@@ -1,0 +1,34 @@
+{{- $root := . }}
+{{- $components := list (dict "name" "gateway" "values" .Values.gateway) (dict "name" "dashboard" "values" .Values.dashboard) }}
+{{- range $components }}
+{{- if and .values.enabled .values.persistence.enabled (not .values.persistence.existingClaim) }}
+{{- $component := .name }}
+{{- $compValues := .values }}
+{{- with $root }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "hermes.fullname" . }}-{{ $component }}
+  labels:
+    {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" $component)) | nindent 4 }}
+  {{- with $compValues.persistence.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  accessModes:
+    - {{ $compValues.persistence.accessMode }}
+  {{- if $compValues.persistence.storageClass }}
+  storageClassName: {{ $compValues.persistence.storageClass }}
+  {{- end }}
+  {{- with $compValues.persistence.selector }}
+  selector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $compValues.persistence.size }}
+{{- end }}
+{{- end }}
+{{- end }}

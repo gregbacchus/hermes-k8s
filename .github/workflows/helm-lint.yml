@@ -81,6 +81,30 @@ jobs:
               assert 'secretRef' in d and 'name: hermes' in d, 'Deployment missing secretRef envFrom'
           print(f'OK: {len(deps)} Deployment(s) still wired with gateway/dashboard envFrom=null')
           "
+      - name: Assert gateway persistence (PVC + HERMES_HOME + fsGroup)
+        run: |
+          helm template hermes ./chart > /tmp/render-pvc.yaml
+          helm template hermes ./chart \
+            --set gateway.persistence.existingClaim=hermes-data > /tmp/render-existingclaim.yaml
+          python3 -c "
+          import re, sys
+          docs = open('/tmp/render-pvc.yaml').read().split('---')
+          pvcs = [d for d in docs if re.search(r'^kind:\s*PersistentVolumeClaim\s*$', d, re.M)]
+          assert len(pvcs) == 1, 'expected exactly one default PVC (gateway persistence)'
+          deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
+          gw = [d for d in deps if 'name: hermes-gateway' in d]
+          assert gw, 'gateway Deployment missing'
+          assert 'HERMES_HOME' in gw[0] and '/opt/data' in gw[0], 'gateway must set HERMES_HOME=/opt/data'
+          assert 'persistentVolumeClaim' in gw[0], 'gateway must mount the PVC'
+          assert 'type: Recreate' in gw[0], 'gateway with persistence must use Recreate strategy'
+          assert 'fsGroup: 1000' in gw[0], 'gateway pod must set fsGroup for a writable volume'
+          d2 = [d for d in deps if 'name: hermes-dashboard' in d]
+          assert d2 and 'HERMES_HOME' not in d2[0], 'dashboard must not set HERMES_HOME by default'
+          docs2 = open('/tmp/render-existingclaim.yaml').read().split('---')
+          assert not [d for d in docs2 if re.search(r'^kind:\s*PersistentVolumeClaim\s*$', d, re.M)], 'existingClaim must suppress chart PVC'
+          assert 'claimName: hermes-data' in open('/tmp/render-existingclaim.yaml').read(), 'existingClaim name must be used'
+          print('OK: persistence PVC + HERMES_HOME + fsGroup wired; existingClaim suppresses PVC')
+          "
       - name: Assert NetworkPolicy allows same-namespace ingress
         run: |
           helm template hermes ./chart \

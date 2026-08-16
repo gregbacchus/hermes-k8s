@@ -88,6 +88,7 @@ gateway:
     runAsNonRoot: true
     runAsUser: 1000
     runAsGroup: 1000
+    fsGroup: 1000
   ## Container-level securityContext (capabilities, readOnlyRootFilesystem, allowPrivilegeEscalation, ...)
   containerSecurityContext:
     allowPrivilegeEscalation: false
@@ -97,6 +98,22 @@ gateway:
         - ALL
   priorityClassName: ""
   topologySpreadConstraints: []
+  ## Durable storage for the gateway. Hermes persists its self-managed state (config,
+  ## .env, sessions, memories, skills, cron, logs) under HERMES_HOME, which the chart
+  ## points at `mountPath`. The official Hermes layout uses `/opt/data` (the container's
+  ## mutable state dir; `/opt/hermes` stays an immutable, read-only install tree).
+  ## A ReadWriteOnce volume attaches to only one pod, so with persistence enabled the
+  ## gateway runs as a single replica with a `Recreate` rollout strategy (see `strategy`).
+  persistence:
+    enabled: true
+    mountPath: /opt/data
+    existingClaim: ""
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 1Gi
+    annotations: {}
+    selector: {}
+    subPath: ""
   extraVolumes: []
   extraVolumeMounts: []
   lifecycle: {}
@@ -167,6 +184,7 @@ dashboard:
     runAsNonRoot: true
     runAsUser: 1000
     runAsGroup: 1000
+    fsGroup: 1000
   ## Container-level securityContext (capabilities, readOnlyRootFilesystem, allowPrivilegeEscalation, ...)
   containerSecurityContext:
     allowPrivilegeEscalation: false
@@ -176,6 +194,20 @@ dashboard:
         - ALL
   priorityClassName: ""
   topologySpreadConstraints: []
+  ## Optional durable storage for the dashboard. The dashboard is a stateless web UI,
+  ## so persistence is disabled by default; enable it only if a specific dashboard
+  ## build writes state to disk. When enabled, HERMES_HOME points at `mountPath`
+  ## (the official Hermes layout uses `/opt/data`).
+  persistence:
+    enabled: false
+    mountPath: /opt/data
+    existingClaim: ""
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 1Gi
+    annotations: {}
+    selector: {}
+    subPath: ""
   extraVolumes: []
   extraVolumeMounts: []
   lifecycle: {}

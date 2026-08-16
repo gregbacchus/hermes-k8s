@@ -4,6 +4,9 @@
 {{- if and .values.enabled .values.autoscaling.enabled (or .values.autoscaling.targetCPUUtilizationPercentage .values.autoscaling.targetMemoryUtilizationPercentage) }}
 {{- $component := .name }}
 {{- $compValues := .values }}
+{{- if and $compValues.persistence.enabled (gt (int $compValues.autoscaling.maxReplicas) 1) }}
+{{- fail (printf "%s.persistence is a ReadWriteOnce volume that can attach to only one pod at a time. Set %s.autoscaling.maxReplicas: 1 (or disable autoscaling) while persistence is enabled." $component $component) }}
+{{- end }}
 {{- with $root }}
 ---
 apiVersion: autoscaling/v2

@@ -55,13 +55,59 @@ dashboard containers:
 
 ```bash
 helm install hermes ./chart \
-  --set 'config.data[APP_ENV]=production' \
+  --set 'config.data.APP_ENV=production' \
   --set secret.enabled=true \
-  --set 'secret.stringData[API_TOKEN]=change-me'
+  --set 'secret.stringData.API_TOKEN=change-me'
 ```
 
 `gateway.envFrom` / `dashboard.envFrom` entries are appended after the shared refs, so
 per-component sources can override the shared keys.
+
+### Persistence (Hermes self-managed state)
+
+Hermes stores and self-manages its own state — `config.yaml`, `.env`, `SOUL.md`,
+`sessions/`, `memories/`, `skills/`, `cron/`, and `logs/` — under a single directory
+(the official Hermes layout uses `/opt/data`, mapping to the host's `~/.hermes`; the
+install tree `/opt/hermes` stays immutable). Because the agent writes and modifies this
+state itself, it must live on a persistent, writable volume.
+
+The chart mounts a `PersistentVolumeClaim` at `persistence.mountPath` (default
+`/opt/data`) and sets `HERMES_HOME` to that path, so the Hermes process reads and writes
+all of its state on durable storage:
+
+- `gateway.persistence.enabled` — default `true`. The gateway is stateful, so a PVC is
+  created and mounted by default.
+- `dashboard.persistence.enabled` — default `false`. The dashboard is a stateless web UI;
+  enable only if your dashboard build writes state to disk.
+- `persistence.existingClaim` — point at a pre-provisioned PVC instead of letting the
+  chart create one.
+- `persistence.storageClass`, `persistence.size`, `persistence.accessMode` — the default
+  `ReadWriteOnce` + `1Gi` works for a single-node gateway; set `accessMode: ReadWriteMany`
+  or an existing claim for multi-replica deployments.
+
+Because a `ReadWriteOnce` volume can only attach to one pod, when `persistence.enabled`
+the chart runs a single replica with a `Recreate` rollout strategy and refuses to render
+if you try to scale past one replica or enable autoscaling above `maxReplicas: 1`:
+
+```bash
+# Persistent gateway using the default /opt/data mount:
+helm install hermes ./chart
+
+# Reuse an existing PVC:
+helm install hermes ./chart \
+  --set gateway.persistence.existingClaim=hermes-data
+
+# Match the host ~/.hermes semantics (the official Docker layout):
+helm install hermes ./chart \
+  --set gateway.persistence.mountPath=/opt/data
+```
+
+The pod runs non-root (uid/gid `1000`) with `fsGroup: 1000`, so the volume is made
+group-writable and the Hermes process can write its state without root.
+
+> **Warning**: never run two Hermes **gateway** pods against the same data directory
+> simultaneously — session files and memory stores are not designed for concurrent
+> access. Keep the gateway at `replicaCount: 1` when persistence is enabled.
 
 ### Service accounts
 
@@ -99,11 +145,15 @@ dropped, and privilege escalation disabled.
 | `gateway.service.port` | Gateway service port | `8080` |
 | `gateway.resources` | Gateway resource requests/limits | see `values.yaml` |
 | `gateway.autoscaling.enabled` | Enable HPA for the gateway | `false` |
+| `gateway.persistence.enabled` | Create and mount a PVC for gateway state (sets `HERMES_HOME`) | `true` |
+| `gateway.persistence.mountPath` | Where gateway state is mounted (and `HERMES_HOME` points to) | `/opt/data` |
+| `gateway.persistence.size` | Gateway PVC size | `1Gi` |
 | `dashboard.enabled` | Deploy the dashboard workload | `true` |
 | `dashboard.replicaCount` | Dashboard replicas | `1` |
 | `dashboard.image.repository` | Dashboard image repository | `ghcr.io/geee-be/hermes-dashboard` |
 | `dashboard.image.tag` | Dashboard image tag | `0.1.0` |
 | `dashboard.service.port` | Dashboard service port | `3000` |
+| `dashboard.persistence.enabled` | Create and mount a PVC for dashboard state | `false` |
 | `config.enabled` | Create the shared ConfigMap and wire it into both workloads | `true` |
 | `config.data` | Shared config map data (exposed as env vars via `envFrom`) | `{}` |
 | `secret.enabled` | Create a shared Secret and wire it into both workloads | `false` |
