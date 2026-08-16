@@ -35,7 +35,9 @@
 
 {{- if .Values.gateway.apiServer.enabled }}
 {{- if not (or .Values.gateway.apiServer.key .Values.gateway.apiServer.keySecretRef.name .Values.secret.enabled) }}
-Note: the gateway API server requires an API_SERVER_KEY. Set gateway.apiServer.key,
-gateway.apiServer.keySecretRef, or secret.stringData.API_SERVER_KEY to start it.
+Note: the gateway API server requires an API_SERVER_KEY of at least 16 characters.
+Set gateway.apiServer.key, gateway.apiServer.keySecretRef, or
+secret.stringData.API_SERVER_KEY to start it. Shorter keys are silently rejected by
+the Hermes image and the pod crash-loops.
 {{- end }}
 {{- end }}

@@ -56,8 +56,11 @@ gateway:
   envFrom: []
 
   ## OpenAI-compatible API server (also serves the health endpoint). Requires a
-  ## `key` (min 8 chars) to start; Hermes fails closed without it. Prefer
-  ## `keySecretRef` (or the shared `secret.stringData.API_SERVER_KEY`) over `key`.
+  ## `key` of at least 16 chars to start — the Hermes image silently refuses keys
+  ## shorter than 16, leaving no listener on 8642 (pod crash-loops). The chart
+  ## fails at render time if a shorter `key` is set. Prefer `keySecretRef` (or the
+  ## shared `secret.stringData.API_SERVER_KEY`) over a plaintext `key`; an external
+  ## Secret's value cannot be length-validated at render time.
   apiServer:
     enabled: true
     host: "0.0.0.0"
@@ -101,9 +104,11 @@ gateway:
     targetCPUUtilizationPercentage: 80
     targetMemoryUtilizationPercentage: null
 
-  ## The API server exposes `GET /health` (and `GET /v1/health`). It only responds
-  ## once Hermes is configured with a model/provider; until then the pod reports
-  ## NotReady but the gateway process itself keeps running.
+  ## The API server exposes `GET /health` (and `GET /v1/health`). With a valid
+  ## >=16-char key it responds HTTP 200 on a fresh, unconfigured install — the pod
+  ## becomes Ready immediately. With no key (or a <16-char key) the API server
+  ## never binds, so `/health` is connection-refused and the pod fails its probes
+  ## (crash-loop) while the gateway process itself keeps running.
   livenessProbe:
     enabled: true
     path: /health
@@ -194,6 +199,12 @@ gateway:
   ## uses `/opt/data`). A ReadWriteOnce volume attaches to one pod, so with
   ## persistence enabled the gateway runs a single replica with a `Recreate`
   ## rollout (see `strategy`).
+  ##
+  ## When persistence is disabled the chart mounts an ephemeral emptyDir at
+  ## `mountPath` so Hermes still has a writable state directory under
+  ## readOnlyRootFilesystem (the image's own VOLUME is Docker-only; kubelet does
+  ## not mount it). State is then lost on pod restart — use only for stateless
+  ## evaluation.
   persistence:
     enabled: true
     mountPath: /opt/data
@@ -246,7 +257,21 @@ podDisruptionBudget:
   minAvailable: 1
   maxUnavailable: null
 
-## NetworkPolicy (default-deny; same-namespace + DNS egress allowed)
+## NetworkPolicy (default-deny; same-namespace + DNS egress allowed). Default-deny
+## egress also blocks the gateway's outbound calls to external model APIs, so when
+## you enable it you must add an egress rule for the providers you use — e.g.:
+##   networkPolicy:
+##     enabled: true
+##     extraEgressRules:
+##       - to:
+##           - ipBlock:
+##               cidr: 0.0.0.0/0
+##               except: [169.254.169.254/32]
+##         ports:
+##           - protocol: TCP
+##             port: 443
+## (For a tighter policy, replace the 0.0.0.0/0 CIDR with the provider's IP ranges
+## or a namespaceSelector for an egress proxy.)
 networkPolicy:
   enabled: false
   extraIngressRules: []

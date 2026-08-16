@@ -31,7 +31,11 @@ spec:
               service:
                 name: {{ include "hermes.fullname" $ }}-{{ .service }}
                 port:
+                  {{- if kindIs "string" (default "api" .port) }}
                   name: {{ .port | default "api" }}
+                  {{- else }}
+                  number: {{ .port }}
+                  {{- end }}
           {{- end }}
     {{- end }}
 {{- end }}

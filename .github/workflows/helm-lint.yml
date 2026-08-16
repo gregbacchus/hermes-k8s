@@ -19,6 +19,13 @@ jobs:
         run: helm lint ./chart
       - name: Template chart
         run: helm template hermes ./chart > /tmp/render.yaml
+      - name: Assert short API key fails to render
+        run: |
+          if helm template hermes ./chart --set gateway.apiServer.key=shortkey > /tmp/render-shortkey.yaml 2>/dev/null; then
+            echo "ERROR: helm template must fail for an API key shorter than 16 characters"
+            exit 1
+          fi
+          echo "OK: short API key rejected at render time"
       - name: Validate schema
         run: |
           kubectl apply --dry-run=client --validate=true -f /tmp/render.yaml
@@ -169,12 +176,13 @@ jobs:
         run: |
           mkdir -p /tmp/hermes-smoke/data /tmp/hermes-smoke/run /tmp/hermes-smoke/tmp
           docker run -d --name hermes-smoke \
+            -p 8642:8642 \
             -v /tmp/hermes-smoke/data:/opt/data \
             -v /tmp/hermes-smoke/run:/run \
             -v /tmp/hermes-smoke/tmp:/tmp \
             -e API_SERVER_ENABLED=true \
             -e API_SERVER_HOST=0.0.0.0 \
-            -e API_SERVER_KEY=testkey123 \
+            -e API_SERVER_KEY=testkey1234567890 \
             --cap-drop=ALL --cap-add=CHOWN --cap-add=DAC_OVERRIDE --cap-add=SETGID --cap-add=SETUID \
             --read-only --security-opt no-new-privileges \
             nousresearch/hermes-agent:latest gateway run
@@ -195,6 +203,19 @@ jobs:
             [ "$uid" = 10000 ] && echo "state.db uid=10000 OK" || { echo "state.db uid=$uid (want 10000)"; exit 1; }
             echo "state-write smoke passed"
           '
+      - name: Assert API server /health returns HTTP 200
+        run: |
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8642/health 2>/dev/null || true)
+            if [ "$code" = "200" ]; then
+              echo "OK: /health returned HTTP 200"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "ERROR: /health never returned HTTP 200 (last code: ${code:-none})"
+          docker logs hermes-smoke 2>&1 | tail -50 || true
+          exit 1
       - name: Cleanup
         if: always()
         run: docker rm -f hermes-smoke || true

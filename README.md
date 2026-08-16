@@ -46,8 +46,14 @@ Two consequences drive the chart design:
 
 ```bash
 git clone https://github.com/gregbacchus/hermes-k8s
-helm install hermes ./hermes-k8s/chart
+helm install hermes ./hermes-k8s/chart \
+  --set secret.enabled=true \
+  --set 'secret.stringData.API_SERVER_KEY=change-me-min-16-chars'
 ```
+
+> The gateway API server requires an `API_SERVER_KEY` of at least 16 characters.
+> Installing with no key (or a shorter key) leaves no listener on port 8642 and the
+> pod crash-loops on its liveness probe — see [Gateway API server](#gateway-api-server).
 
 For a custom namespace:
 
@@ -71,7 +77,7 @@ without running the interactive setup wizard:
 helm install hermes ./chart \
   --set secret.enabled=true \
   --set 'secret.stringData.ANTHROPIC_API_KEY=sk-ant-...' \
-  --set 'secret.stringData.API_SERVER_KEY=change-me-min-8-chars'
+  --set 'secret.stringData.API_SERVER_KEY=change-me-min-16-chars'
 ```
 
 The chart also creates a shared `ConfigMap` (`config.data`) wired into the gateway as
@@ -86,12 +92,18 @@ default and requires a bearer key:
 - `gateway.apiServer.enabled` — default `true` (`API_SERVER_ENABLED=true`).
 - `gateway.apiServer.host` / `gateway.apiServer.port` — bind address/port (default
   `0.0.0.0` / `8642`).
-- `gateway.apiServer.key` — plaintext `API_SERVER_KEY` (min 8 chars).
+- `gateway.apiServer.key` — plaintext `API_SERVER_KEY` (min 16 chars, image-enforced).
+  The chart fails to render if a shorter key is supplied.
 - `gateway.apiServer.keySecretRef` — reference an existing Secret instead (`{name, key}`).
+  The Secret's value cannot be length-validated at render time, so it must itself be
+  16+ chars.
 - `gateway.apiServer.corsOrigins` — optional browser allowlist.
 
-> The API server fails closed without a key: until `API_SERVER_KEY` is set the gateway
-> process runs but `/health` does not respond and the pod reports `NotReady`.
+> The API server binds only when `API_SERVER_KEY` is a valid (16+ char) key. With no
+> key — or a key the image rejects — nothing listens on 8642, `/health` is
+> connection-refused, and the pod fails its liveness probe (crash-loop) even though the
+> gateway process itself keeps running. With a valid key, `/health` returns HTTP 200 on a
+> fresh, unconfigured install and the pod becomes Ready immediately.
 
 ### Dashboard
 
@@ -121,6 +133,12 @@ The chart mounts a `PersistentVolumeClaim` at `gateway.persistence.mountPath` (d
 - `gateway.persistence.existingClaim` — reuse a pre-provisioned PVC.
 - `gateway.persistence.storageClass`, `size`, `accessMode` — default `ReadWriteOnce` +
   `2Gi` (upstream recommends 500 MB–2 GB+).
+
+When persistence is disabled the chart mounts an ephemeral `emptyDir` at
+`gateway.persistence.mountPath` so Hermes still has a writable state directory under the
+read-only root filesystem (the image's own `VOLUME /opt/data` is Docker-only — kubelet
+does not mount image-declared volumes). State is then lost on pod restart; use this only
+for stateless evaluation.
 
 A `ReadWriteOnce` volume attaches to one pod, so with persistence enabled the chart runs a
 single replica with a `Recreate` strategy and refuses to render if you scale past one
@@ -215,6 +233,9 @@ ingress:
           port: dashboard
 ```
 
+Each `paths[].port` may be a Service **port name** (`api`, `dashboard`) or a **port
+number** (`8642`, `9119`); the chart renders `port.name` or `port.number` accordingly.
+
 ### NetworkPolicy
 
 `networkPolicy.enabled=true` applies default-deny with DNS egress (port 53) and
@@ -243,7 +264,7 @@ docker run -d --rm --name hermes-smoke \
   -v /tmp/hermes-smoke/data:/opt/data \
   -v /tmp/hermes-smoke/run:/run \
   -v /tmp/hermes-smoke/tmp:/tmp \
-  -e API_SERVER_ENABLED=true -e API_SERVER_HOST=0.0.0.0 -e API_SERVER_KEY=testkey123 \
+  -e API_SERVER_ENABLED=true -e API_SERVER_HOST=0.0.0.0 -e API_SERVER_KEY=testkey1234567890 \
   --cap-drop=ALL --cap-add=CHOWN --cap-add=DAC_OVERRIDE --cap-add=SETGID --cap-add=SETUID \
   --read-only --security-opt no-new-privileges \
   nousresearch/hermes-agent:latest gateway run
