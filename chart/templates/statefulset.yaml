@@ -2,6 +2,9 @@
 {{- if and .Values.gateway.apiServer.enabled (not .Values.gateway.apiServer.keySecretRef.name) .Values.gateway.apiServer.key (lt (len .Values.gateway.apiServer.key) 16) }}
 {{- fail "gateway.apiServer.key must be at least 16 characters: the Hermes image refuses keys shorter than 16, so the API server never binds 8642 and the pod crash-loops. Use a >=16-char key, or supply an external Secret via gateway.apiServer.keySecretRef (length cannot be validated at render time)." }}
 {{- end }}
+{{- if .Values.gateway.command }}
+{{- fail "gateway.command must not be set: the Hermes image ENTRYPOINT is the s6-overlay dispatcher, and a Kubernetes `command` OVERRIDES it, making the kubelet exec a nonexistent `gateway` binary (every pod crash-loops). Pass the subcommand via gateway.args instead (e.g. args: [\"gateway\", \"run\"])." }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -97,10 +100,6 @@ spec:
         - name: gateway
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          {{- with .Values.gateway.command }}
-          command:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
           {{- with .Values.gateway.args }}
           args:
             {{- toYaml . | nindent 12 }}
@@ -191,7 +190,8 @@ spec:
           {{- if .Values.gateway.startupProbe }}
           startupProbe:
             {{- toYaml .Values.gateway.startupProbe | nindent 12 }}
-          {{- else if .Values.gateway.livenessProbe.enabled }}
+          {{- end }}
+          {{- if .Values.gateway.livenessProbe.enabled }}
           livenessProbe:
             httpGet:
               path: {{ .Values.gateway.livenessProbe.path }}

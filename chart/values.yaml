@@ -51,8 +51,15 @@ gateway:
   annotations: {}
   podAnnotations: {}
   podLabels: {}
-  command: ["gateway", "run"]
-  args: []
+  ## IMPORTANT: do NOT set `command`. The image ENTRYPOINT is the s6-overlay
+  ## dispatcher (entrypoint-dispatch.sh -> /init -> uid-drop -> service
+  ## supervision). Kubernetes `command` OVERRIDES the ENTRYPOINT, so setting it
+  ## would make the kubelet exec a nonexistent `gateway` binary
+  ## (`exec: "gateway": executable file not found in $PATH`) and every pod
+  ## crash-loops. `gateway` is a Hermes subcommand; pass it via `args`, which
+  ## are appended to the preserved ENTRYPOINT (entrypoint -> main-wrapper ->
+  ## `hermes gateway run`).
+  args: ["gateway", "run"]
   env: []
   envFrom: []
 

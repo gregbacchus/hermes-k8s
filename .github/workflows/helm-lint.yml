@@ -66,6 +66,57 @@ jobs:
           assert not [d for d in docs if re.search(r'\"helm.sh/hook\": test', d)], 'test hook must be gated on apiServer.enabled'
           print('OK: apiServer.enabled=false gates probes + test hook and sets API_SERVER_ENABLED=false')
           "
+      - name: Assert gateway.args renders (no command override) — ENTRYPOINT preserved
+        run: |
+          helm template hermes ./chart > /tmp/render-cmdargs.yaml
+          python3 -c "
+          import re, sys
+          docs = open('/tmp/render-cmdargs.yaml').read().split('---')
+          sts = [d for d in docs if re.search(r'^kind:\s*StatefulSet\s*$', d, re.M)]
+          assert len(sts) == 1, 'expected exactly one StatefulSet'
+          gw = sts[0]
+          # The chart must never render `command:` — it overrides the image ENTRYPOINT
+          # (the s6-overlay dispatcher) and makes the kubelet exec a nonexistent binary.
+          assert not re.search(r'^\s*command:\s*\$', gw, re.M), 'StatefulSet must not set command (ENTRYPOINT override breaks the image)'
+          assert re.search(r'args:\s*\n\s*- gateway\s*\n\s*- run', gw), 'StatefulSet must render args: [gateway, run]'
+          print('OK: gateway runs via args (no command override), ENTRYPOINT preserved')
+          "
+      - name: Assert gateway.command render guard fails
+        run: |
+          if helm template hermes ./chart --set-json 'gateway.command=["gateway","run"]' > /tmp/render-command.yaml 2>/dev/null; then
+            echo "ERROR: helm template must fail when gateway.command is set"
+            exit 1
+          fi
+          echo "OK: gateway.command is rejected at render time"
+      - name: Assert startupProbe does not drop the liveness probe
+        run: |
+          helm template hermes ./chart \
+            --set gateway.startupProbe.httpGet.path=/health \
+            --set gateway.startupProbe.httpGet.port=api > /tmp/render-startup.yaml
+          python3 -c "
+          import re, sys
+          docs = open('/tmp/render-startup.yaml').read().split('---')
+          sts = [d for d in docs if re.search(r'^kind:\s*StatefulSet\s*$', d, re.M)]
+          assert sts, 'no StatefulSet rendered'
+          gw = sts[0]
+          assert re.search(r'startupProbe:\s*\$', gw, re.M), 'startupProbe must render when set'
+          assert re.search(r'livenessProbe:\s*\$', gw, re.M), 'livenessProbe must still render alongside startupProbe'
+          print('OK: startupProbe and livenessProbe render together')
+          "
+      - name: Assert numeric targetPort renders a string Service port name
+        run: |
+          helm template hermes ./chart \
+            --set gateway.service.targetPort=8642 > /tmp/render-numport.yaml
+          python3 -c "
+          import re, sys
+          docs = open('/tmp/render-numport.yaml').read().split('---')
+          svc = [d for d in docs if re.search(r'^kind:\s*Service\s*$', d, re.M) and 'name: hermes-gateway' in d]
+          assert svc, 'no gateway Service rendered'
+          assert re.search(r'name:\s*\"8642\"', svc[0]), 'numeric targetPort must render a string port name'
+          assert re.search(r'targetPort:\s*8642\s*\$', svc[0], re.M), 'numeric targetPort must render as an integer'
+          assert not re.search(r'name:\s*8642\s*\$', svc[0], re.M), 'port name must be a string, not a bare integer'
+          print('OK: numeric targetPort renders a string name + integer targetPort')
+          "
       - name: Assert ingress quoted numeric port renders number
         run: |
           cat > /tmp/ingress-port-string.yaml <<'YAML'
@@ -270,6 +321,11 @@ jobs:
       - name: Boot gateway against an empty volume (chart securityContext)
         run: |
           mkdir -p /tmp/hermes-smoke/data /tmp/hermes-smoke/run /tmp/hermes-smoke/tmp
+          # Boot the image EXACTLY as the chart ships it: the image ENTRYPOINT (s6-overlay
+          # dispatcher) is preserved and the rendered `args` are appended as CMD. Do NOT use
+          # `--entrypoint` (the chart must never render a `command` override — the ENTRYPOINT
+          # is mandatory) and do NOT rely on `docker run image gateway run` semantics, which
+          # would mask a `command:` override bug in the rendered StatefulSet.
           docker run -d --name hermes-smoke \
             -v /tmp/hermes-smoke/data:/opt/data \
             -v /tmp/hermes-smoke/run:/run \

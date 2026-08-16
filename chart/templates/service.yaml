@@ -13,9 +13,11 @@ metadata:
 spec:
   type: {{ .Values.gateway.service.type }}
   ports:
-    - name: {{ .Values.gateway.service.targetPort }}
+    {{- $tp := .Values.gateway.service.targetPort }}
+    {{- $numeric := regexMatch "^[0-9]+$" (toString $tp) }}
+    - name: {{ if $numeric }}{{ $tp | quote }}{{ else }}{{ $tp }}{{ end }}
       port: {{ .Values.gateway.service.port }}
-      targetPort: {{ .Values.gateway.service.targetPort }}
+      targetPort: {{ if $numeric }}{{ int $tp }}{{ else }}{{ $tp }}{{ end }}
       protocol: TCP
     {{- range .Values.gateway.service.extraPorts }}
     - {{ toYaml . | nindent 6 | trimPrefix "  " }}
@@ -38,9 +40,11 @@ metadata:
 spec:
   type: {{ .Values.gateway.dashboard.service.type }}
   ports:
-    - name: {{ .Values.gateway.dashboard.service.targetPort }}
+    {{- $tp := .Values.gateway.dashboard.service.targetPort }}
+    {{- $numeric := regexMatch "^[0-9]+$" (toString $tp) }}
+    - name: {{ if $numeric }}{{ $tp | quote }}{{ else }}{{ $tp }}{{ end }}
       port: {{ .Values.gateway.dashboard.service.port }}
-      targetPort: {{ .Values.gateway.dashboard.service.targetPort }}
+      targetPort: {{ if $numeric }}{{ int $tp }}{{ else }}{{ $tp }}{{ end }}
       protocol: TCP
     {{- range .Values.gateway.dashboard.service.extraPorts }}
     - {{ toYaml . | nindent 6 | trimPrefix "  " }}

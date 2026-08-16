@@ -203,6 +203,12 @@ kubectl delete pvc <release-name>-gateway -n <namespace>
 > an ephemeral `emptyDir`, silently orphaning the PVC and booting the agent with a fresh,
 > empty state. Reuse `gateway.persistence.existingClaim` to reattach existing state instead.
 
+> **Reinstall trap**: because the PVC is kept on `helm uninstall`, reinstalling the same
+> release name fails with `... already exists` until you delete the leftover PVC:
+> `kubectl delete pvc <release-name>-gateway -n <namespace>` (this also purges the agent's
+> state — see above). Reinstall only if you are happy to destroy that state, or reuse
+> `gateway.persistence.existingClaim` to reattach it.
+
 ### Security contexts
 
 The image must start as **root** so s6-overlay can chown the data volume and seed first-boot
@@ -239,7 +245,7 @@ out-of-band account.
 | `image.tag` | Hermes image tag (pin for production) | `latest` |
 | `gateway.enabled` | Deploy the gateway workload | `true` |
 | `gateway.replicaCount` | Gateway replicas (keep `1` with persistence) | `1` |
-| `gateway.command` | Container command | `["gateway", "run"]` |
+| `gateway.args` | Container args (appended to the image ENTRYPOINT) | `["gateway", "run"]` |
 | `gateway.apiServer.enabled` | Enable the OpenAI-compatible API server | `true` |
 | `gateway.apiServer.host` / `port` | API server bind address / port | `0.0.0.0` / `8642` |
 | `gateway.apiServer.key` | API server bearer key | `""` |
