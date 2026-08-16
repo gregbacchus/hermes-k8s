@@ -4,7 +4,7 @@
 {{- end }}
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: {{ include "hermes.fullname" . }}-gateway
   labels:
@@ -14,16 +14,17 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
+  serviceName: {{ include "hermes.fullname" . }}-gateway
   replicas: {{ .Values.gateway.replicaCount }}
   {{- if and .Values.gateway.persistence.enabled (gt (int .Values.gateway.replicaCount) 1) }}
   {{- fail "gateway.persistence is a ReadWriteOnce volume that can attach to only one pod at a time. Set gateway.replicaCount: 1, or switch to ReadWriteMany / external storage before scaling." }}
   {{- end }}
-  {{- if .Values.gateway.strategy }}
-  strategy:
-    {{- toYaml .Values.gateway.strategy | nindent 4 }}
-  {{- else if .Values.gateway.persistence.enabled }}
-  strategy:
-    type: Recreate
+  {{- if .Values.gateway.updateStrategy }}
+  updateStrategy:
+    {{- toYaml .Values.gateway.updateStrategy | nindent 4 }}
+  {{- else }}
+  updateStrategy:
+    type: RollingUpdate
   {{- end }}
   selector:
     matchLabels:

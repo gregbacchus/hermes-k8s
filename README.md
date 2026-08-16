@@ -34,49 +34,37 @@ Two consequences drive the chart design:
 
 1. **Hermes is stateful** — it self-manages `config.yaml`, `.env`, `state.db`, sessions,
    memory, and skills on disk. Two gateway containers must never share one data directory
-   (session files and memory stores are not concurrency-safe). The chart therefore runs a
-   single gateway replica with a `ReadWriteOnce` PVC and a `Recreate` rollout.
+   (session files and memory stores are not concurrency-safe). The chart therefore models
+   the gateway as a single-replica `StatefulSet` backed by a `ReadWriteOnce` PVC.
 2. **The dashboard runs in the gateway's container** — the official image supervises the
    dashboard (and per-profile gateways) with s6-overlay *inside the same container*. A
    standalone dashboard container needs a shared PID/network namespace for gateway-liveness
    detection, so the chart models the dashboard as a flag on the single gateway pod
-   (`gateway.dashboard.enabled` → `HERMES_DASHBOARD=1`), not a separate Deployment.
+   (`gateway.dashboard.enabled` → `HERMES_DASHBOARD=1`), not a separate workload.
 
-## Deployment vs StatefulSet
+## StatefulSet vs Deployment
 
-Hermes is **stateful but single-writer**, so the chart models the gateway as a
-`Deployment`, not a `StatefulSet`. The board has asked why; here is the evidence-based
-rationale.
+The gateway is a `StatefulSet`, not a `Deployment`. Hermes is a **stateful, single-writer**
+workload: it manages agent state (`config.yaml`, `.env`, `SOUL.md`, `state.db`, `sessions/`,
+`memories/`, `skills/`, `cron/`, `logs/`) directly on the filesystem under `HERMES_HOME`
+(`/opt/data`), and **exactly one process may write that directory at a time** ("never run two
+Hermes gateway containers against the same data directory simultaneously"). A `StatefulSet`
+is the correct model because Hermes's identity is its managed filesystem state, which must
+survive pod replacement and `helm uninstall` intact.
 
-**Statefulness model.** All Hermes state (`config.yaml`, `.env`, `SOUL.md`, `state.db`,
-`sessions/`, `memories/`, `skills/`, `cron/`, `logs/`) lives in one directory
-(`HERMES_HOME` = `/opt/data`) that **exactly one process may write at a time** ("never run
-two Hermes gateway containers against the same data directory simultaneously"). The chart
-enforces this single-writer contract with:
+The chart enforces the single-writer contract with:
 
 - a single replica (`gateway.replicaCount: 1`),
 - a `ReadWriteOnce` PVC (attaches to one pod at a time),
-- a `Recreate` rollout (old pod stopped before the new one starts), and
-- render-time `fail` guards if `replicaCount > 1` or HPA `maxReplicas > 1` while
-  persistence is enabled.
+- a `StatefulSet` whose default `updateStrategy: RollingUpdate` terminates the old pod before
+  the new one starts (a single-replica rolling update never runs two pods concurrently), and
+- render-time `fail` guards if `replicaCount > 1` or HPA `maxReplicas > 1` while persistence
+  is enabled.
 
-**Why not a StatefulSet.** A `StatefulSet` buys three things, none of which Hermes needs:
-
-1. **Stable network identity** (`{name}-0`, `{name}-1`). Hermes is reached through its
-   `Service`, never by pod hostname, and stores no hostname-keyed state — `gateway.lock`,
-   `pid`, and `state.db` live in the data directory, and the container runtime starts the
-   image with a fresh container ID each time. Stable identity would be unused.
-2. **Ordered, graceful scaling.** A single-replica single-writer app never scales out;
-   ordered start/stop is irrelevant.
-3. **PVC-per-replica** (`volumeClaimTemplates`). With one replica there is exactly one
-   PVC; per-replica provisioning adds nothing.
-
-A `StatefulSet` would not remove the downtime of a `Recreate` rollout either.
-
-**When a StatefulSet becomes required.** Switch to a `StatefulSet` only if Hermes gains a
-feature that needs one of the three properties above — e.g. multi-writer replicas,
-hostname-keyed state (peer discovery/replication by pod hostname), or a PVC-per-replica
-storage layout. None of those exist today.
+Because Hermes is reached through its `Service` (never by pod hostname) and never scales out,
+the `StatefulSet`'s stable-network-identity and ordered-scaling guarantees are incidental —
+what matters is the persistence semantics, which the `StatefulSet` documents as the canonical
+model for a workload whose state lives on disk.
 
 ## Installing
 
@@ -192,7 +180,8 @@ does not mount image-declared volumes). State is then lost on pod restart; use t
 for stateless evaluation.
 
 A `ReadWriteOnce` volume attaches to one pod, so with persistence enabled the chart runs a
-single replica with a `Recreate` strategy and refuses to render if you scale past one
+single-replica `StatefulSet` (default `updateStrategy: RollingUpdate`, which on one replica
+terminates the old pod before the new one starts) and refuses to render if you scale past one
 replica or enable autoscaling above `maxReplicas: 1`.
 
 > **Warning**: never run two Hermes gateways against the same data directory — session

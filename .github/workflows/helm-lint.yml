@@ -19,6 +19,18 @@ jobs:
         run: helm lint ./chart
       - name: Template chart
         run: helm template hermes ./chart > /tmp/render.yaml
+      - name: Assert exactly one StatefulSet and zero Deployments
+        run: |
+          python3 -c "
+          import re, sys
+          docs = open('/tmp/render.yaml').read().split('---')
+          sts = [d for d in docs if re.search(r'^kind:\s*StatefulSet\s*$', d, re.M)]
+          deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
+          assert len(sts) == 1, 'expected exactly one StatefulSet'
+          assert not deps, 'must not render any Deployment (gateway is a StatefulSet)'
+          assert 'serviceName:' in sts[0], 'StatefulSet must set serviceName (governing Service)'
+          print('OK: exactly one StatefulSet rendered, zero Deployments')
+          "
       - name: Assert short API key fails to render
         run: |
           if helm template hermes ./chart --set gateway.apiServer.key=shortkey > /tmp/render-shortkey.yaml 2>/dev/null; then
@@ -34,8 +46,8 @@ jobs:
           python3 -c "
           import re, sys
           docs = open('/tmp/render-keyref.yaml').read().split('---')
-          deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
-          assert deps, 'no Deployment rendered'
+          deps = [d for d in docs if re.search(r'^kind:\s*StatefulSet\s*$', d, re.M)]
+          assert deps, 'no StatefulSet rendered'
           assert 'secretKeyRef' in deps[0] and 'name: my-secret' in deps[0], 'must prefer keySecretRef over plaintext key'
           print('OK: short key + keySecretRef.name renders (guard skipped)')
           "
@@ -46,8 +58,8 @@ jobs:
           python3 -c "
           import re, sys
           docs = open('/tmp/render-apiserver-off.yaml').read().split('---')
-          deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
-          assert deps, 'no Deployment rendered'
+          deps = [d for d in docs if re.search(r'^kind:\s*StatefulSet\s*$', d, re.M)]
+          assert deps, 'no StatefulSet rendered'
           gw = deps[0]
           assert 'livenessProbe' not in gw and 'readinessProbe' not in gw and 'startupProbe' not in gw, 'probes must be gated on apiServer.enabled'
           assert re.search(r'name: API_SERVER_ENABLED\s*\n\s*value: \"false\"', gw), 'must set API_SERVER_ENABLED=false when disabled'
@@ -107,7 +119,7 @@ jobs:
               assert re.search(r'/health\b', d), 'hook must target the API server /health path'
           print(f'OK: {len(hooks)} test hook(s) target /health unprivileged')
           "
-      - name: Assert config/secret are wired into the Deployment
+      - name: Assert config/secret are wired into the StatefulSet
         run: |
           helm template hermes ./chart \
             --set config.enabled=true \
@@ -115,11 +127,11 @@ jobs:
           python3 -c "
           import re, sys
           docs = open('/tmp/render-envfrom.yaml').read().split('---')
-          deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
-          assert len(deps) == 1, 'expected exactly one Deployment'
-          assert 'configMapRef' in deps[0] and 'name: hermes' in deps[0], 'Deployment missing configMapRef envFrom'
-          assert 'secretRef' in deps[0] and 'name: hermes' in deps[0], 'Deployment missing secretRef envFrom'
-          print('OK: Deployment wired to shared config/secret')
+          deps = [d for d in docs if re.search(r'^kind:\s*StatefulSet\s*$', d, re.M)]
+          assert len(deps) == 1, 'expected exactly one StatefulSet'
+          assert 'configMapRef' in deps[0] and 'name: hermes' in deps[0], 'StatefulSet missing configMapRef envFrom'
+          assert 'secretRef' in deps[0] and 'name: hermes' in deps[0], 'StatefulSet missing secretRef envFrom'
+          print('OK: StatefulSet wired to shared config/secret')
           "
       - name: Assert gateway.envFrom=null renders (concat nil-safety)
         run: |
@@ -130,9 +142,9 @@ jobs:
           python3 -c "
           import re, sys
           docs = open('/tmp/render-envfrom-null.yaml').read().split('---')
-          deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
-          assert deps and 'configMapRef' in deps[0], 'Deployment missing configMapRef envFrom'
-          print('OK: Deployment still wired with gateway.envFrom=null')
+          deps = [d for d in docs if re.search(r'^kind:\s*StatefulSet\s*$', d, re.M)]
+          assert deps and 'configMapRef' in deps[0], 'StatefulSet missing configMapRef envFrom'
+          print('OK: StatefulSet still wired with gateway.envFrom=null')
           "
       - name: Assert gateway persistence (PVC + HERMES_HOME + fsGroup 10000)
         run: |
@@ -145,12 +157,13 @@ jobs:
           pvcs = [d for d in docs if re.search(r'^kind:\s*PersistentVolumeClaim\s*$', d, re.M)]
           assert len(pvcs) == 1, 'expected exactly one default PVC (gateway persistence)'
           assert re.search(r'helm\.sh/resource-policy:\s*keep', pvcs[0]), 'PVC must be annotated helm.sh/resource-policy: keep (uninstall must not destroy state)'
-          deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
-          assert len(deps) == 1, 'expected exactly one Deployment'
+          deps = [d for d in docs if re.search(r'^kind:\s*StatefulSet\s*$', d, re.M)]
+          assert len(deps) == 1, 'expected exactly one StatefulSet'
           gw = deps[0]
+          assert 'serviceName:' in gw, 'StatefulSet must set serviceName (governing Service)'
+          assert 'updateStrategy:' in gw and 'type: RollingUpdate' in gw, 'gateway must use RollingUpdate updateStrategy'
           assert 'HERMES_HOME' in gw and '/opt/data' in gw, 'gateway must set HERMES_HOME=/opt/data'
           assert 'persistentVolumeClaim' in gw, 'gateway must mount the PVC'
-          assert 'type: Recreate' in gw, 'gateway with persistence must use Recreate strategy'
           assert 'fsGroup: 10000' in gw, 'gateway pod must set fsGroup: 10000'
           assert 'readOnlyRootFilesystem: true' in gw, 'gateway must use a read-only root filesystem'
           assert 'scratch-run' in gw and 'mountPath: /run' in gw, 'gateway needs a writable /run scratch mount'
@@ -170,8 +183,8 @@ jobs:
           import re, sys
           docs = open('/tmp/render-nopersist.yaml').read().split('---')
           assert not [d for d in docs if re.search(r'^kind:\s*PersistentVolumeClaim\s*$', d, re.M)], 'persistence.enabled=false must render no PVC'
-          deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
-          assert deps, 'no Deployment rendered'
+          deps = [d for d in docs if re.search(r'^kind:\s*StatefulSet\s*$', d, re.M)]
+          assert deps, 'no StatefulSet rendered'
           gw = deps[0]
           assert re.search(r'- name: gateway-data\s*\n\s*emptyDir:\s*\{\}', gw), 'persistence.enabled=false must mount an emptyDir at the state path'
           assert 'persistentVolumeClaim' not in gw, 'persistence.enabled=false must not reference a PVC'
@@ -196,8 +209,8 @@ jobs:
           python3 -c "
           import re, sys
           docs = open('/tmp/render-seccomp.yaml').read().split('---')
-          deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
-          assert deps, 'no Deployment rendered'
+          deps = [d for d in docs if re.search(r'^kind:\s*StatefulSet\s*$', d, re.M)]
+          assert deps, 'no StatefulSet rendered'
           gw = deps[0]
           assert 'allowPrivilegeEscalation: false' in gw, 'must set allowPrivilegeEscalation: false'
           # The s6 bootstrap needs CHOWN/DAC_OVERRIDE/SETGID/SETUID; a bare drop of ALL
@@ -214,7 +227,7 @@ jobs:
           python3 -c "
           import re, sys
           docs = open('/tmp/render-image.yaml').read().split('---')
-          deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
+          deps = [d for d in docs if re.search(r'^kind:\s*StatefulSet\s*$', d, re.M)]
           gw = deps[0]
           assert 'nousresearch/hermes-agent' in gw, 'gateway must use nousresearch/hermes-agent image'
           assert 'containerPort: 8642' in gw, 'gateway must expose port 8642 (api)'

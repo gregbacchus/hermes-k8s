@@ -42,8 +42,9 @@ image:
 ## ---------- Hermes Gateway ----------
 ## One pod runs the Hermes agent (`gateway run`). The dashboard is a supervised
 ## s6 service inside the SAME container (see `gateway.dashboard`), not a separate
-## Deployment — the official image requires a shared PID/network namespace for the
-## dashboard's gateway-liveness detection.
+## workload — the official image requires a shared PID/network namespace for the
+## dashboard's gateway-liveness detection. The gateway itself is a StatefulSet
+## (Hermes is stateful: its self-managed filesystem state is single-writer).
 gateway:
   enabled: true
   replicaCount: 1
@@ -211,8 +212,10 @@ gateway:
   ## .env, SOUL.md, state.db (SQLite), sessions/, memories/, skills/, cron/, logs/
   ## under HERMES_HOME, which the chart points at `mountPath` (the official layout
   ## uses `/opt/data`). A ReadWriteOnce volume attaches to one pod, so with
-  ## persistence enabled the gateway runs a single replica with a `Recreate`
-  ## rollout (see `strategy`).
+  ## persistence enabled the gateway is a single-replica StatefulSet that scales
+  ## to at most one pod (enforced at render time and by the HPA guard). The
+  ## default `updateStrategy: RollingUpdate` on a single replica terminates the
+  ## old pod before the new one starts, preserving the single-writer contract.
   ##
   ## The chart-created PVC is annotated `helm.sh/resource-policy: keep`, so
   ## `helm uninstall` leaves the PVC (and the agent's managed state) in place
@@ -241,7 +244,7 @@ gateway:
   extraVolumeMounts: []
   lifecycle: {}
   terminationGracePeriodSeconds: 30
-  strategy: {}
+  updateStrategy: {}
 
 ## Shared config / secret material, wired into the gateway container as envFrom.
 ## API keys and API_SERVER_KEY are read by Hermes directly from environment
