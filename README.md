@@ -109,6 +109,31 @@ helm install hermes ./chart \
 
 ### Enabling ingress
 
+Use a values file to keep hosts, paths, and TLS together — this is the most
+robust form and avoids Helm `--set` array-replacement pitfalls:
+
+```bash
+helm install hermes ./chart \
+  --set ingress.enabled=true \
+  -f ingress-values.yaml
+```
+
+```yaml
+# ingress-values.yaml
+ingress:
+  className: nginx
+  hosts:
+    - host: hermes.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: gateway
+          port: http
+```
+
+You can also enable ingress with a single `--set` flag; any host without an
+explicit `paths` list defaults to `/{Prefix}` routed to the gateway:
+
 ```bash
 helm install hermes ./chart \
   --set ingress.enabled=true \

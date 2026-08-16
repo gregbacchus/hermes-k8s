@@ -23,7 +23,8 @@ spec:
     - host: {{ .host }}
       http:
         paths:
-          {{- range .paths }}
+          {{- $paths := .paths | default (list (dict "path" "/" "pathType" "Prefix" "service" "gateway" "port" "http")) }}
+          {{- range $paths }}
           - path: {{ .path }}
             pathType: {{ .pathType }}
             backend:

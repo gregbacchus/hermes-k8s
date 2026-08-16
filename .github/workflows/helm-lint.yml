@@ -3,9 +3,9 @@ name: helm-lint
 on:
   push:
     branches: [main]
-    paths: ['chart/**']
+    paths: ['chart/**', 'README.md']
   pull_request:
-    paths: ['chart/**']
+    paths: ['chart/**', 'README.md']
 
 jobs:
   lint:
@@ -39,3 +39,24 @@ jobs:
           curl -sSfL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
             | tar xz -C /tmp
           /tmp/kubeconform -strict -summary -output pretty /tmp/render.yaml
+      - name: Validate ingress variants (kubeconform)
+        run: |
+          helm template hermes ./chart \
+            --set ingress.enabled=true > /tmp/render-ingress-default.yaml
+          helm template hermes ./chart \
+            --set ingress.enabled=true \
+            --set ingress.className=nginx \
+            --set 'ingress.hosts[0].host=hermes.example.com' > /tmp/render-ingress-readme.yaml
+          for f in /tmp/render-ingress-default.yaml /tmp/render-ingress-readme.yaml; do
+            python3 -c "
+            import re, sys
+            docs = open('$f').read().split('---')
+            for d in docs:
+                if not re.search(r'^kind:\s*Ingress\s*$', d, re.M):
+                    continue
+                paths = re.findall(r'^\s*- path:\s*', d, re.M)
+                assert paths, 'ERROR: Ingress rendered with no paths'
+            print('OK: Ingress defines paths in $f')
+            "
+            /tmp/kubeconform -strict -summary -output pretty "$f"
+          done
