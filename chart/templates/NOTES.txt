@@ -47,6 +47,15 @@ starts the API server if any API_SERVER_KEY reaches the container (e.g. via
 secret.stringData or gateway.envFrom) — it ignores API_SERVER_ENABLED=false.
 {{- end }}
 
+NOTE: the Hermes image starts as root (s6-overlay bootstrap) and requires the capabilities
+CHOWN, DAC_OVERRIDE, SETGID, SETUID. These are incompatible with the Kubernetes
+"restricted" PodSecurity policy. The namespace must use the "baseline" enforcement level:
+  kubectl label namespace {{ .Release.Namespace }} \
+    pod-security.kubernetes.io/enforce=baseline \
+    pod-security.kubernetes.io/enforce-version=latest
+Warnings of the form "would violate PodSecurity 'restricted:latest'" are structural and
+cannot be resolved without replacing the image's init system.
+
 {{- if not .Values.gateway.persistence.enabled }}
 WARNING: gateway.persistence.enabled is false. Hermes's self-managed state
 (config.yaml, .env, SOUL.md, state.db, sessions/, memories/, skills/, cron/, logs/)

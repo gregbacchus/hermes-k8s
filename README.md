@@ -217,6 +217,18 @@ The chart therefore does **not** set `runAsUser`/`runAsNonRoot` (the image refus
 non-root bootstrap); it sets `fsGroup: 10000` so the PVC is group-writable even if the
 image's internal chown is bypassed, and `seccompProfile: RuntimeDefault`.
 
+> **Pod Security Admission**: the four bootstrap capabilities (`CHOWN`, `DAC_OVERRIDE`,
+> `SETGID`, `SETUID`) and the root start-up are incompatible with the `restricted` PSA
+> policy. The namespace must use the **`baseline`** enforcement level (or be exempt):
+> ```bash
+> kubectl label namespace <your-ns> \
+>   pod-security.kubernetes.io/enforce=baseline \
+>   pod-security.kubernetes.io/enforce-version=latest
+> ```
+> Warnings of the form `would violate PodSecurity "restricted:latest": unrestricted
+> capabilities … runAsNonRoot != true` are expected in `restricted`-labelled namespaces
+> and are structural — they cannot be resolved without changing the image.
+
 The container runs with `allowPrivilegeEscalation: false` (no-new-privileges) and a
 read-only root filesystem. Capabilities are dropped to a minimal set: the chart drops `ALL`
 and adds back only the four the s6-overlay bootstrap needs — `CHOWN` (chown `/opt/data`),
