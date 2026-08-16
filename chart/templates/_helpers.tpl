@@ -92,12 +92,20 @@ Whether to create the gateway service account.
 Service account annotations for the gateway.
 */}}
 {{- define "hermes.serviceAccountAnnotations" -}}
-{{- if .Values.gateway.serviceAccount.annotations }}{{ toYaml .Values.gateway.serviceAccount.annotations }}{{ else }}{{ toYaml .Values.serviceAccount.annotations }}{{ end }}
+{{- $specific := default (.Values.serviceAccount.annotations | default dict) .Values.gateway.serviceAccount.annotations }}
+{{- merge (deepCopy $specific) (.Values.commonAnnotations | default dict) | toYaml }}
 {{- end }}
 
 {{/*
-Return the gateway pod annotations.
+Return the gateway pod annotations (component-level wins over top-level).
 */}}
 {{- define "hermes.podAnnotations" -}}
-{{- merge (deepCopy .Values.podAnnotations) (default (dict) .Values.gateway.podAnnotations) | toYaml }}
+{{- merge (deepCopy (default (dict) .Values.gateway.podAnnotations)) .Values.podAnnotations | toYaml }}
+{{- end }}
+
+{{/*
+Return merged pod labels (component-level wins over top-level).
+*/}}
+{{- define "hermes.podLabels" -}}
+{{- merge (deepCopy (default (dict) .Values.gateway.podLabels)) .Values.podLabels | toYaml }}
 {{- end }}

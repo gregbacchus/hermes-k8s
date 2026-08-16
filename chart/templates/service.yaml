@@ -6,16 +6,17 @@ metadata:
   name: {{ include "hermes.fullname" . }}-gateway
   labels:
     {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" "gateway")) | nindent 4 }}
-  {{- with .Values.gateway.service.annotations }}
+  {{- $ann := merge (deepCopy (.Values.gateway.service.annotations | default dict)) (.Values.commonAnnotations | default dict) }}
+  {{- if $ann }}
   annotations:
-    {{- toYaml . | nindent 4 }}
+    {{- toYaml $ann | nindent 4 }}
   {{- end }}
 spec:
   type: {{ .Values.gateway.service.type }}
   ports:
     {{- $tp := .Values.gateway.service.targetPort }}
     {{- $numeric := regexMatch "^[0-9]+$" (toString $tp) }}
-    - name: {{ if $numeric }}{{ $tp | quote }}{{ else }}{{ $tp }}{{ end }}
+    - name: api
       port: {{ .Values.gateway.service.port }}
       targetPort: {{ if $numeric }}{{ int $tp }}{{ else }}{{ $tp }}{{ end }}
       protocol: TCP
@@ -33,16 +34,17 @@ metadata:
   name: {{ include "hermes.fullname" . }}-dashboard
   labels:
     {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" "dashboard")) | nindent 4 }}
-  {{- with .Values.gateway.dashboard.service.annotations }}
+  {{- $ann := merge (deepCopy (.Values.gateway.dashboard.service.annotations | default dict)) (.Values.commonAnnotations | default dict) }}
+  {{- if $ann }}
   annotations:
-    {{- toYaml . | nindent 4 }}
+    {{- toYaml $ann | nindent 4 }}
   {{- end }}
 spec:
   type: {{ .Values.gateway.dashboard.service.type }}
   ports:
     {{- $tp := .Values.gateway.dashboard.service.targetPort }}
     {{- $numeric := regexMatch "^[0-9]+$" (toString $tp) }}
-    - name: {{ if $numeric }}{{ $tp | quote }}{{ else }}{{ $tp }}{{ end }}
+    - name: dashboard
       port: {{ .Values.gateway.dashboard.service.port }}
       targetPort: {{ if $numeric }}{{ int $tp }}{{ else }}{{ $tp }}{{ end }}
       protocol: TCP

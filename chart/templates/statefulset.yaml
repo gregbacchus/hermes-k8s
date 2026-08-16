@@ -5,6 +5,9 @@
 {{- if .Values.gateway.command }}
 {{- fail "gateway.command must not be set: the Hermes image ENTRYPOINT is the s6-overlay dispatcher, and a Kubernetes `command` OVERRIDES it, making the kubelet exec a nonexistent `gateway` binary (every pod crash-loops). Pass the subcommand via gateway.args instead (e.g. args: [\"gateway\", \"run\"])." }}
 {{- end }}
+{{- if and .Values.gateway.persistence.enabled (gt (int .Values.gateway.replicaCount) 1) }}
+{{- fail "gateway.persistence is a ReadWriteOnce volume that can attach to only one pod at a time. Set gateway.replicaCount: 1, or switch to ReadWriteMany / external storage before scaling." }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -12,16 +15,14 @@ metadata:
   name: {{ include "hermes.fullname" . }}-gateway
   labels:
     {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" "gateway")) | nindent 4 }}
-  {{- with .Values.gateway.annotations }}
+  {{- $ann := merge (deepCopy (.Values.gateway.annotations | default dict)) (.Values.commonAnnotations | default dict) }}
+  {{- if $ann }}
   annotations:
-    {{- toYaml . | nindent 4 }}
+    {{- toYaml $ann | nindent 4 }}
   {{- end }}
 spec:
   serviceName: {{ include "hermes.fullname" . }}-gateway
   replicas: {{ .Values.gateway.replicaCount }}
-  {{- if and .Values.gateway.persistence.enabled (gt (int .Values.gateway.replicaCount) 1) }}
-  {{- fail "gateway.persistence is a ReadWriteOnce volume that can attach to only one pod at a time. Set gateway.replicaCount: 1, or switch to ReadWriteMany / external storage before scaling." }}
-  {{- end }}
   {{- if .Values.gateway.updateStrategy }}
   updateStrategy:
     {{- toYaml .Values.gateway.updateStrategy | nindent 4 }}
@@ -36,8 +37,9 @@ spec:
     metadata:
       labels:
         {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" "gateway")) | nindent 8 }}
-        {{- with .Values.gateway.podLabels }}
-        {{- toYaml . | nindent 8 }}
+        {{- $podLabels := include "hermes.podLabels" . | fromYaml }}
+        {{- if $podLabels }}
+        {{- toYaml $podLabels | nindent 8 }}
         {{- end }}
       {{- $podAnnotations := include "hermes.podAnnotations" (merge (deepCopy .) (dict "component" "gateway")) | fromYaml }}
       {{- if $podAnnotations }}
@@ -154,7 +156,13 @@ spec:
             - name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
               value: {{ .Values.gateway.dashboard.auth.basicAuth.username | quote }}
             {{- end }}
-            {{- if .Values.gateway.dashboard.auth.basicAuth.password }}
+            {{- if .Values.gateway.dashboard.auth.basicAuth.passwordSecretRef.name }}
+            - name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.gateway.dashboard.auth.basicAuth.passwordSecretRef.name }}
+                  key: {{ .Values.gateway.dashboard.auth.basicAuth.passwordSecretRef.key }}
+            {{- else if .Values.gateway.dashboard.auth.basicAuth.password }}
             - name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
               value: {{ .Values.gateway.dashboard.auth.basicAuth.password | quote }}
             {{- end }}

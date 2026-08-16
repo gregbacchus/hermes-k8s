@@ -171,6 +171,9 @@ gateway:
       basicAuth:
         username: ""
         password: ""
+        passwordSecretRef:
+          name: ""
+          key: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
         secret: ""
 
   ## Pod-level securityContext. The image MUST start as root so s6-overlay can

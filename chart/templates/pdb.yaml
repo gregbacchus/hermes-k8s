@@ -1,4 +1,7 @@
 {{- if and .Values.podDisruptionBudget.enabled .Values.gateway.enabled }}
+{{- if and .Values.podDisruptionBudget.minAvailable .Values.podDisruptionBudget.maxUnavailable }}
+{{- fail "podDisruptionBudget: set only one of minAvailable or maxUnavailable — Kubernetes rejects a PDB with both." }}
+{{- end }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -6,6 +9,10 @@ metadata:
   name: {{ include "hermes.fullname" . }}-gateway
   labels:
     {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" "gateway")) | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   {{- if .Values.podDisruptionBudget.minAvailable }}
   minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}

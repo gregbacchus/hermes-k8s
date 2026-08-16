@@ -3,9 +3,9 @@ name: helm-lint
 on:
   push:
     branches: [main]
-    paths: ['chart/**', 'README.md']
+    paths: ["chart/**", "README.md"]
   pull_request:
-    paths: ['chart/**', 'README.md']
+    paths: ["chart/**", "README.md"]
 
 jobs:
   lint:
@@ -105,19 +105,19 @@ jobs:
           assert re.search(r'livenessProbe:\s*\$', gw, re.M), 'livenessProbe must still render alongside startupProbe'
           print('OK: startupProbe and livenessProbe render together')
           "
-      - name: Assert numeric targetPort renders a string Service port name
+      - name: Assert numeric targetPort renders integer and gateway port is always named "api"
         run: |
           helm template hermes ./chart \
             --set gateway.service.targetPort=8642 > /tmp/render-numport.yaml
           python3 -c "
           import re, sys
           docs = open('/tmp/render-numport.yaml').read().split('---')
-          svc = [d for d in docs if re.search(r'^kind:\s*Service\s*$', d, re.M) and 'name: hermes-gateway' in d]
+          svc = [d for d in docs if re.search(r'^kind:\\s*Service\\s*$', d, re.M) and 'name: hermes-gateway' in d]
           assert svc, 'no gateway Service rendered'
-          assert re.search(r'name:\s*\"8642\"', svc[0]), 'numeric targetPort must render a string port name'
-          assert re.search(r'targetPort:\s*8642\s*\$', svc[0], re.M), 'numeric targetPort must render as an integer'
-          assert not re.search(r'name:\s*8642\s*\$', svc[0], re.M), 'port name must be a string, not a bare integer'
-          print('OK: numeric targetPort renders a string name + integer targetPort')
+          assert re.search(r'name:\\s*api\\s*$', svc[0], re.M), 'gateway service port must always be named \"api\"'
+          assert re.search(r'targetPort:\\s*8642\\s*$', svc[0], re.M), 'numeric targetPort must render as an integer'
+          assert not re.search(r'name:\\s*8642', svc[0]), 'port name must not be derived from targetPort'
+          print('OK: numeric targetPort renders integer, port name is always \"api\"')
           "
       - name: Assert ingress quoted numeric port renders number
         run: |

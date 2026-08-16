@@ -6,9 +6,10 @@ metadata:
   name: {{ include "hermes.fullname" . }}
   labels:
     {{- include "hermes.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
+  {{- $ann := merge (deepCopy (.Values.ingress.annotations | default dict)) (.Values.commonAnnotations | default dict) }}
+  {{- if $ann }}
   annotations:
-    {{- toYaml . | nindent 4 }}
+    {{- toYaml $ann | nindent 4 }}
   {{- end }}
 spec:
   {{- if .Values.ingress.className }}
