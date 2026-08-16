@@ -18,7 +18,6 @@ metadata:
   {{- end }}
 spec:
   type: {{ $compValues.service.type }}
-  {{- with $compValues.service.ports }}
   ports:
     - name: http
       port: {{ $compValues.service.port }}
@@ -27,7 +26,6 @@ spec:
     {{- range $compValues.service.extraPorts }}
     - {{ toYaml . | nindent 6 | trimPrefix "  " }}
     {{- end }}
-  {{- end }}
   selector:
     {{- include "hermes.componentSelectorLabels" (merge (deepCopy .) (dict "component" $component)) | nindent 4 }}
 {{- end }}

@@ -22,6 +22,18 @@ jobs:
       - name: Validate schema
         run: |
           kubectl apply --dry-run=client --validate=true -f /tmp/render.yaml
+      - name: Assert services define ports
+        run: |
+          python3 -c "
+          import re, sys
+          docs = open('/tmp/render.yaml').read().split('---')
+          services = [d for d in docs if re.search(r'^kind:\s*Service\s*$', d, re.M)]
+          assert services, 'no Services rendered'
+          for d in services:
+              if not re.search(r'^  ports:\s*$', d, re.M):
+                  sys.exit('ERROR: Service without ports block rendered')
+          print(f'OK: {len(services)} Service(s) all define ports')
+          "
       - name: Validate strict schema (kubeconform)
         run: |
           curl -sSfL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
