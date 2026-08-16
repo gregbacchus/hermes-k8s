@@ -33,7 +33,7 @@ jobs:
           "
       - name: Assert short API key fails to render
         run: |
-          if helm template hermes ./chart --set gateway.apiServer.key=shortkey > /tmp/render-shortkey.yaml 2>/dev/null; then
+          if helm template hermes ./chart --set gateway.apiServer.enabled=true --set gateway.apiServer.key=shortkey > /tmp/render-shortkey.yaml 2>/dev/null; then
             echo "ERROR: helm template must fail for an API key shorter than 16 characters"
             exit 1
           fi
@@ -41,6 +41,7 @@ jobs:
       - name: Assert keySecretRef skips the short-key render guard
         run: |
           helm template hermes ./chart \
+            --set gateway.apiServer.enabled=true \
             --set gateway.apiServer.key=shortkey \
             --set gateway.apiServer.keySecretRef.name=my-secret > /tmp/render-keyref.yaml
           python3 -c "
@@ -91,6 +92,7 @@ jobs:
       - name: Assert startupProbe does not drop the liveness probe
         run: |
           helm template hermes ./chart \
+            --set gateway.apiServer.enabled=true \
             --set gateway.startupProbe.httpGet.path=/health \
             --set gateway.startupProbe.httpGet.port=api > /tmp/render-startup.yaml
           python3 -c "
@@ -157,9 +159,11 @@ jobs:
           "
       - name: Assert test hook targets /health and runs unprivileged
         run: |
+          helm template hermes ./chart \
+            --set gateway.apiServer.enabled=true > /tmp/render-hook.yaml
           python3 -c "
           import re, sys
-          docs = open('/tmp/render.yaml').read().split('---')
+          docs = open('/tmp/render-hook.yaml').read().split('---')
           hooks = [d for d in docs if re.search(r'\"helm.sh/hook\": test', d)]
           assert hooks, 'no test hook pods rendered'
           for d in hooks:

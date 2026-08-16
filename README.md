@@ -71,13 +71,14 @@ model for a workload whose state lives on disk.
 ```bash
 git clone https://github.com/gregbacchus/hermes-k8s
 helm install hermes ./hermes-k8s/chart \
+  --set gateway.apiServer.enabled=true \
   --set secret.enabled=true \
   --set 'secret.stringData.API_SERVER_KEY=change-me-min-16-chars'
 ```
 
-> The gateway API server requires an `API_SERVER_KEY` of at least 16 characters.
-> Installing with no key (or a shorter key) leaves no listener on port 8642 and the
-> pod crash-loops on its liveness probe — see [Gateway API server](#gateway-api-server).
+> The gateway API server is disabled by default. To enable it you must pass a
+> `gateway.apiServer.key` / `keySecretRef` / `secret.stringData.API_SERVER_KEY` of at
+> least 16 characters — see [Gateway API server](#gateway-api-server).
 
 For a custom namespace:
 
@@ -99,6 +100,7 @@ without running the interactive setup wizard:
 
 ```bash
 helm install hermes ./chart \
+  --set gateway.apiServer.enabled=true \
   --set secret.enabled=true \
   --set 'secret.stringData.ANTHROPIC_API_KEY=sk-ant-...' \
   --set 'secret.stringData.API_SERVER_KEY=change-me-min-16-chars'
@@ -110,10 +112,13 @@ so per-workload values can override shared keys.
 
 ### Gateway API server
 
-The OpenAI-compatible API server is the primary Kubernetes interface. It is enabled by
-default and requires a bearer key:
+The OpenAI-compatible API server is the primary Kubernetes interface. It is **disabled by
+default** (a plain `helm install` runs the gateway agent with no API listener and no health
+probes, which avoids a crash-loop) and requires a bearer key when enabled:
 
-- `gateway.apiServer.enabled` — default `true` (`API_SERVER_ENABLED=true`).
+- `gateway.apiServer.enabled` — default `false`. Set `true` to manage the API server
+  (`API_SERVER_ENABLED=true`, plus the `/health` liveness/readiness probes and the
+  `helm test` hook).
 - `gateway.apiServer.host` / `gateway.apiServer.port` — bind address/port (default
   `0.0.0.0` / `8642`).
 - `gateway.apiServer.key` — plaintext `API_SERVER_KEY` (min 16 chars, image-enforced).
@@ -124,18 +129,30 @@ default and requires a bearer key:
   16+ chars.
 - `gateway.apiServer.corsOrigins` — optional browser allowlist.
 
+Enable it together with a key:
+
+```bash
+helm install hermes ./chart \
+  --set gateway.apiServer.enabled=true \
+  --set gateway.apiServer.key=change-me-min-16-chars
+```
+
 > The API server binds only when `API_SERVER_KEY` is a valid (16+ char) key. With no
 > key — or a key the image rejects — nothing listens on 8642, `/health` is
 > connection-refused, and the pod fails its liveness probe (crash-loop) even though the
 > gateway process itself keeps running. With a valid key, `/health` returns HTTP 200 on a
-> fresh, unconfigured install and the pod becomes Ready immediately.
+> fresh, unconfigured install and the pod becomes Ready immediately. Because the chart
+> cannot distinguish "no key on purpose" from "forgot the key", the API server is opt-in
+> rather than broken-by-default.
 
-### Disabling the API server
+### Running without the API server (default)
 
-`gateway.apiServer.enabled=false` makes the chart stop managing the API server: it sets
-`API_SERVER_ENABLED=false`, omits the host/port/key/cors environment, and removes the
-liveness/readiness probes and the `helm test` hook (they target the API server's `/health`,
-which is no longer guaranteed to listen).
+`gateway.apiServer.enabled=false` (the default) makes the chart stop managing the API
+server: it sets `API_SERVER_ENABLED=false`, omits the host/port/key/cors environment, and
+removes the liveness/readiness probes and the `helm test` hook (they target the API
+server's `/health`, which is no longer guaranteed to listen). A plain `helm install` runs
+the gateway agent with no API listener and no health probes, so it never crash-loops on a
+missing key.
 
 > **Important:** the Hermes image starts the API server whenever a valid `API_SERVER_KEY`
 > is present in the environment and **ignores `API_SERVER_ENABLED`** (verified
@@ -258,7 +275,7 @@ out-of-band account.
 | `gateway.enabled` | Deploy the gateway workload | `true` |
 | `gateway.replicaCount` | Gateway replicas (keep `1` with persistence) | `1` |
 | `gateway.args` | Container args (appended to the image ENTRYPOINT) | `["gateway", "run"]` |
-| `gateway.apiServer.enabled` | Enable the OpenAI-compatible API server | `true` |
+| `gateway.apiServer.enabled` | Enable the OpenAI-compatible API server | `false` |
 | `gateway.apiServer.host` / `port` | API server bind address / port | `0.0.0.0` / `8642` |
 | `gateway.apiServer.key` | API server bearer key | `""` |
 | `gateway.service.type` / `port` | Gateway service type / port | `ClusterIP` / `8642` |
@@ -321,7 +338,8 @@ same-namespace traffic allowed; extend with `networkPolicy.extraIngressRules` /
 
 `helm test` runs a smoke pod that requests the gateway API server's health endpoint
 (`GET /health` on the gateway service) as an unprivileged user and succeeds on a 2xx
-response. This requires a configured gateway (API key set):
+response. This requires the API server enabled with a key set
+(`--set gateway.apiServer.enabled=true` plus a key):
 
 ```bash
 helm test hermes

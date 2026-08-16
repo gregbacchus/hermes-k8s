@@ -71,6 +71,11 @@ gateway:
   ## render time). Prefer `keySecretRef` (or the shared
   ## `secret.stringData.API_SERVER_KEY`) over a plaintext `key`.
   ##
+  ## The API server is DISABLED by default: enabling it without a key makes the
+  ## image leave no listener on 8642, so the /health probes fail and the pod
+  ## crash-loops. Enable it only together with a key (or a keySecretRef / the
+  ## shared secret) — the chart fails at render time if a shorter key is set.
+  ##
   ## `enabled: false` tells the chart to stop managing the API server: it sets
   ## `API_SERVER_ENABLED=false`, omits the host/port/key/cors env, and drops the
   ## liveness/readiness probes and the `helm test` hook (they target `/health` on
@@ -82,7 +87,7 @@ gateway:
   ## `secret.stringData.API_SERVER_KEY`, `gateway.env`, and `gateway.envFrom`
   ## clear of it).
   apiServer:
-    enabled: true
+    enabled: false
     host: "0.0.0.0"
     port: 8642
     key: ""
