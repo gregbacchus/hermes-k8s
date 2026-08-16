@@ -1,10 +1,5 @@
-{{- $root := . }}
-{{- $gatewayEnabled := .Values.gateway.enabled }}
-{{- $dashboardEnabled := .Values.dashboard.enabled }}
-Hermes gateway and dashboard have been deployed to the cluster.
-
-{{- if $gatewayEnabled }}
-1. Get the gateway application URL by running these commands:
+{{- if .Values.gateway.enabled }}
+1. Get the gateway API server URL:
 {{- if contains "NodePort" .Values.gateway.service.type }}
   export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "hermes.fullname" . }}-gateway)
   export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
@@ -17,17 +12,17 @@ Hermes gateway and dashboard have been deployed to the cluster.
 {{- end }}
 {{- end }}
 
-{{- if $dashboardEnabled }}
-2. Get the dashboard application URL by running these commands:
-{{- if contains "NodePort" .Values.dashboard.service.type }}
+{{- if and .Values.gateway.enabled .Values.gateway.dashboard.enabled }}
+2. Get the dashboard URL:
+{{- if contains "NodePort" .Values.gateway.dashboard.service.type }}
   export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "hermes.fullname" . }}-dashboard)
   export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
   echo http://$NODE_IP:$NODE_PORT
-{{- else if contains "LoadBalancer" .Values.dashboard.service.type }}
+{{- else if contains "LoadBalancer" .Values.gateway.dashboard.service.type }}
   export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "hermes.fullname" . }}-dashboard -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-  echo http://$SERVICE_IP:{{ .Values.dashboard.service.port }}
+  echo http://$SERVICE_IP:{{ .Values.gateway.dashboard.service.port }}
 {{- else }}
-  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "hermes.fullname" . }}-dashboard {{ .Values.dashboard.service.port }}:{{ .Values.dashboard.service.port }}
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "hermes.fullname" . }}-dashboard {{ .Values.gateway.dashboard.service.port }}:{{ .Values.gateway.dashboard.service.port }}
 {{- end }}
 {{- end }}
 
@@ -35,5 +30,12 @@ Hermes gateway and dashboard have been deployed to the cluster.
 3. The services are exposed through ingress:
 {{- range .Values.ingress.hosts }}
    - https://{{ .host }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.gateway.apiServer.enabled }}
+{{- if not (or .Values.gateway.apiServer.key .Values.gateway.apiServer.keySecretRef.name .Values.secret.enabled) }}
+Note: the gateway API server requires an API_SERVER_KEY. Set gateway.apiServer.key,
+gateway.apiServer.keySecretRef, or secret.stringData.API_SERVER_KEY to start it.
 {{- end }}
 {{- end }}

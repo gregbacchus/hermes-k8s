@@ -69,56 +69,35 @@ app.kubernetes.io/component: {{ .component }}
 {{- end }}
 
 {{/*
-Create the name of the service account to use.
-component-scoped: value takes precedence; falls back to global serviceAccount config.
+Create the name of the gateway service account to use.
 */}}
 {{- define "hermes.serviceAccountName" -}}
 {{- if .Values.serviceAccount.name }}
 {{- .Values.serviceAccount.name }}
-{{- else if eq .component "gateway" }}
-{{- if .Values.gateway.serviceAccount.name }}
+{{- else if .Values.gateway.serviceAccount.name }}
 {{- .Values.gateway.serviceAccount.name }}
 {{- else }}
 {{- include "hermes.fullname" . | printf "%s-gateway" }}
 {{- end }}
-{{- else }}
-{{- if .Values.dashboard.serviceAccount.name }}
-{{- .Values.dashboard.serviceAccount.name }}
-{{- else }}
-{{- include "hermes.fullname" . | printf "%s-dashboard" }}
-{{- end }}
-{{- end }}
 {{- end }}
 
 {{/*
-Whether to create a component-scoped service account.
+Whether to create the gateway service account.
 */}}
 {{- define "hermes.serviceAccountCreate" -}}
-{{- if eq .component "gateway" }}
 {{- if (kindIs "bool" .Values.gateway.serviceAccount.create) }}{{ .Values.gateway.serviceAccount.create }}{{ else }}{{ .Values.serviceAccount.create }}{{ end }}
-{{- else }}
-{{- if (kindIs "bool" .Values.dashboard.serviceAccount.create) }}{{ .Values.dashboard.serviceAccount.create }}{{ else }}{{ .Values.serviceAccount.create }}{{ end }}
-{{- end }}
 {{- end }}
 
 {{/*
-Service account annotations for a component.
+Service account annotations for the gateway.
 */}}
 {{- define "hermes.serviceAccountAnnotations" -}}
-{{- if eq .component "gateway" }}
 {{- if .Values.gateway.serviceAccount.annotations }}{{ toYaml .Values.gateway.serviceAccount.annotations }}{{ else }}{{ toYaml .Values.serviceAccount.annotations }}{{ end }}
-{{- else }}
-{{- if .Values.dashboard.serviceAccount.annotations }}{{ toYaml .Values.dashboard.serviceAccount.annotations }}{{ else }}{{ toYaml .Values.serviceAccount.annotations }}{{ end }}
-{{- end }}
 {{- end }}
 
 {{/*
-Return the component-scoped pod annotations.
+Return the gateway pod annotations.
 */}}
 {{- define "hermes.podAnnotations" -}}
-{{- if eq .component "gateway" }}
 {{- merge (deepCopy .Values.podAnnotations) (default (dict) .Values.gateway.podAnnotations) | toYaml }}
-{{- else }}
-{{- merge (deepCopy .Values.podAnnotations) (default (dict) .Values.dashboard.podAnnotations) | toYaml }}
-{{- end }}
 {{- end }}

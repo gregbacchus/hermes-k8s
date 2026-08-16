@@ -1,6 +1,7 @@
 # hermes-k8s
 
-Helm chart for running the **Hermes gateway** and **Hermes dashboard** on Kubernetes.
+Helm chart for running the [Hermes agent](https://github.com/NousResearch/hermes-agent)
+gateway and dashboard on Kubernetes.
 
 ## Contents
 
@@ -11,10 +12,37 @@ Helm chart for running the **Hermes gateway** and **Hermes dashboard** on Kubern
 - Kubernetes 1.25+
 - Helm v3.x
 
-## Installing
+## Hermes runtime contract (verified)
 
-This chart is not yet published to a chart repository. Install it directly from this
-repository:
+The chart is built against the official `nousresearch/hermes-agent` image, whose runtime
+contract was verified against the published docs and empirically (Docker smoke, see
+`Verifying the release`):
+
+| Aspect | Value |
+| --- | --- |
+| Image | `nousresearch/hermes-agent` (pin `image.tag` for production) |
+| Gateway API server | port `8642` (OpenAI-compatible API + `GET /health`) |
+| Dashboard | port `9119`, enabled with `HERMES_DASHBOARD=1` |
+| State directory | `/opt/data` (host `~/.hermes`); `HERMES_HOME` points here |
+| State files | `config.yaml`, `.env`, `SOUL.md`, `state.db` (SQLite, WAL), `sessions/`, `memories/`, `skills/`, `cron/`, `logs/` |
+| Runtime user | `hermes` uid/gid `10000` (s6-overlay drops from root) |
+| Init | s6-overlay starts as root to chown/seed `/opt/data`, then drops to uid 10000 |
+| Install tree | `/opt/hermes` immutable, root-owned |
+| Minimum resources | 1 GB RAM / 1 core (2 GB with browser tools) |
+
+Two consequences drive the chart design:
+
+1. **Hermes is stateful** — it self-manages `config.yaml`, `.env`, `state.db`, sessions,
+   memory, and skills on disk. Two gateway containers must never share one data directory
+   (session files and memory stores are not concurrency-safe). The chart therefore runs a
+   single gateway replica with a `ReadWriteOnce` PVC and a `Recreate` rollout.
+2. **The dashboard runs in the gateway's container** — the official image supervises the
+   dashboard (and per-profile gateways) with s6-overlay *inside the same container*. A
+   standalone dashboard container needs a shared PID/network namespace for gateway-liveness
+   detection, so the chart models the dashboard as a flag on the single gateway pod
+   (`gateway.dashboard.enabled` → `HERMES_DASHBOARD=1`), not a separate Deployment.
+
+## Installing
 
 ```bash
 git clone https://github.com/gregbacchus/hermes-k8s
@@ -27,178 +55,142 @@ For a custom namespace:
 helm install hermes ./chart -n hermes --create-namespace
 ```
 
-## Quick start
-
-```bash
-helm install hermes ./chart \
-  --set gateway.image.tag=0.1.0 \
-  --set dashboard.image.tag=0.1.0
-```
-
 ## Configuration
 
-The chart deploys two workloads:
+The chart deploys one workload — the Hermes **gateway** — with the **dashboard** available
+as an in-pod, s6-supervised service. `gateway.*` configures the agent; `gateway.dashboard.*`
+configures the dashboard; `config.*`/`secret.*` supply environment variables to the agent.
 
-- **Gateway** (`gateway.*`) — the Hermes API gateway (default port `8080`).
-- **Dashboard** (`dashboard.*`) — the Hermes web dashboard (default port `3000`).
+### Supplying API keys and configuration
 
-Both workloads share `serviceAccount`, `podAnnotations`, `podLabels`, `nodeSelector`,
-`tolerations`, `affinity`, `imagePullSecrets`, and the shared `config`/`secret` material.
-
-### ConfigMap and Secret
-
-The chart creates a shared `ConfigMap` (when `config.enabled=true`, the default) and an
-optional shared `Secret` (when `secret.enabled=true`). When created, they are wired into
-**both** workloads as `envFrom` sources (`configMapRef`/`secretRef`), so every key in
-`config.data` and `secret.stringData` becomes an environment variable in the gateway and
-dashboard containers:
+Hermes reads API keys and configuration from environment variables (which override the
+`.env` file on disk), so the shared `Secret` is the recommended way to configure the agent
+without running the interactive setup wizard:
 
 ```bash
 helm install hermes ./chart \
-  --set 'config.data.APP_ENV=production' \
   --set secret.enabled=true \
-  --set 'secret.stringData.API_TOKEN=change-me'
+  --set 'secret.stringData.ANTHROPIC_API_KEY=sk-ant-...' \
+  --set 'secret.stringData.API_SERVER_KEY=change-me-min-8-chars'
 ```
 
-`gateway.envFrom` / `dashboard.envFrom` entries are appended after the shared refs, so
-per-component sources can override the shared keys.
+The chart also creates a shared `ConfigMap` (`config.data`) wired into the gateway as
+`envFrom`. `gateway.env` / `gateway.envFrom` entries are appended after the shared sources
+so per-workload values can override shared keys.
+
+### Gateway API server
+
+The OpenAI-compatible API server is the primary Kubernetes interface. It is enabled by
+default and requires a bearer key:
+
+- `gateway.apiServer.enabled` — default `true` (`API_SERVER_ENABLED=true`).
+- `gateway.apiServer.host` / `gateway.apiServer.port` — bind address/port (default
+  `0.0.0.0` / `8642`).
+- `gateway.apiServer.key` — plaintext `API_SERVER_KEY` (min 8 chars).
+- `gateway.apiServer.keySecretRef` — reference an existing Secret instead (`{name, key}`).
+- `gateway.apiServer.corsOrigins` — optional browser allowlist.
+
+> The API server fails closed without a key: until `API_SERVER_KEY` is set the gateway
+> process runs but `/health` does not respond and the pod reports `NotReady`.
+
+### Dashboard
+
+The dashboard is a supervised s6 service in the gateway's container. Enable it and (on a
+non-loopback bind) configure an auth provider — Hermes fails closed on a public bind with no
+auth:
+
+```bash
+helm install hermes ./chart \
+  --set gateway.dashboard.enabled=true \
+  --set 'gateway.dashboard.auth.basicAuth.username=admin' \
+  --set 'gateway.dashboard.auth.basicAuth.password=change-me'
+```
+
+- `gateway.dashboard.host` / `gateway.dashboard.port` — bind address/port (default
+  `0.0.0.0` / `9119`).
+- `gateway.dashboard.auth.basicAuth.*` — bundled username/password provider
+  (`HERMES_DASHBOARD_BASIC_AUTH_*`). For public exposure prefer OAuth/OIDC (see the
+  Hermes dashboard docs) or bind `127.0.0.1` and tunnel.
 
 ### Persistence (Hermes self-managed state)
 
-Hermes stores and self-manages its own state — `config.yaml`, `.env`, `SOUL.md`,
-`sessions/`, `memories/`, `skills/`, `cron/`, and `logs/` — under a single directory
-(the official Hermes layout uses `/opt/data`, mapping to the host's `~/.hermes`; the
-install tree `/opt/hermes` stays immutable). Because the agent writes and modifies this
-state itself, it must live on a persistent, writable volume.
+The chart mounts a `PersistentVolumeClaim` at `gateway.persistence.mountPath` (default
+`/opt/data`) and sets `HERMES_HOME` to that path:
 
-The chart mounts a `PersistentVolumeClaim` at `persistence.mountPath` (default
-`/opt/data`) and sets `HERMES_HOME` to that path, so the Hermes process reads and writes
-all of its state on durable storage:
+- `gateway.persistence.enabled` — default `true`.
+- `gateway.persistence.existingClaim` — reuse a pre-provisioned PVC.
+- `gateway.persistence.storageClass`, `size`, `accessMode` — default `ReadWriteOnce` +
+  `2Gi` (upstream recommends 500 MB–2 GB+).
 
-- `gateway.persistence.enabled` — default `true`. The gateway is stateful, so a PVC is
-  created and mounted by default.
-- `dashboard.persistence.enabled` — default `false`. The dashboard is a stateless web UI;
-  enable only if your dashboard build writes state to disk.
-- `persistence.existingClaim` — point at a pre-provisioned PVC instead of letting the
-  chart create one.
-- `persistence.storageClass`, `persistence.size`, `persistence.accessMode` — the default
-  `ReadWriteOnce` + `1Gi` works for a single-node gateway; set `accessMode: ReadWriteMany`
-  or an existing claim for multi-replica deployments.
+A `ReadWriteOnce` volume attaches to one pod, so with persistence enabled the chart runs a
+single replica with a `Recreate` strategy and refuses to render if you scale past one
+replica or enable autoscaling above `maxReplicas: 1`.
 
-Because a `ReadWriteOnce` volume can only attach to one pod, when `persistence.enabled`
-the chart runs a single replica with a `Recreate` rollout strategy and refuses to render
-if you try to scale past one replica or enable autoscaling above `maxReplicas: 1`:
-
-```bash
-# Persistent gateway using the default /opt/data mount:
-helm install hermes ./chart
-
-# Reuse an existing PVC:
-helm install hermes ./chart \
-  --set gateway.persistence.existingClaim=hermes-data
-
-# Match the host ~/.hermes semantics (the official Docker layout):
-helm install hermes ./chart \
-  --set gateway.persistence.mountPath=/opt/data
-```
-
-The pod runs non-root (uid/gid `1000`) with `fsGroup: 1000`, so the volume is made
-group-writable and the Hermes process can write its state without root.
-
-> **Warning**: never run two Hermes **gateway** pods against the same data directory
-> simultaneously — session files and memory stores are not designed for concurrent
-> access. Keep the gateway at `replicaCount: 1` when persistence is enabled.
-
-### Service accounts
-
-- Each enabled component gets its own `ServiceAccount` (`{name}-gateway`, `{name}-dashboard`)
-  unless a global `serviceAccount.name` is set.
-- A non-empty global `serviceAccount.name` overrides both component names; in that case the
-  chart creates exactly **one** `ServiceAccount` with that name, shared by both workloads.
-- `gateway.serviceAccount.name` / `dashboard.serviceAccount.name` are used only when no global
-  `serviceAccount.name` is set, and apply per component.
-- `serviceAccount.create: false` (or a component-level `create: false`) disables creation; the
-  referenced SA must then be created out of band.
+> **Warning**: never run two Hermes gateways against the same data directory — session
+> files and memory stores are not designed for concurrent access.
 
 ### Security contexts
 
-Pod-level and container-level `securityContext` are rendered from separate values, matching the
-Kubernetes API:
+The image must start as **root** so s6-overlay can chown the data volume and seed first-boot
+config, after which it drops every supervised service to the `hermes` user (uid/gid 10000).
+The chart therefore does **not** set `runAsUser`/`runAsNonRoot` (the image refuses arbitrary
+non-root bootstrap); it sets `fsGroup: 10000` so the PVC is group-writable even if the
+image's internal chown is bypassed, and `seccompProfile: RuntimeDefault`.
 
-- `podSecurityContext` — pod-level fields such as `runAsUser`, `runAsGroup`, `runAsNonRoot`,
-  `fsGroup`, `seccompProfile`.
-- `containerSecurityContext` — container-level fields such as `capabilities`, 
-  `readOnlyRootFilesystem`, `allowPrivilegeEscalation`.
+The container runs with `allowPrivilegeEscalation: false`, all capabilities dropped, and a
+read-only root filesystem. `readOnlyRootFilesystem: true` requires two writable scratch
+volumes, which the chart mounts automatically:
 
-Defaults run as non-root (`runAsUser: 1000`) with a read-only root filesystem, all capabilities
-dropped, and privilege escalation disabled.
+- `/run` — s6-overlay's runtime state (a **disk-backed** emptyDir; a `medium: Memory`
+  tmpfs is mounted `noexec` and breaks s6-overlay).
+- `/tmp` — the runtime's scratch space.
+
+### Service accounts
+
+The gateway gets a `ServiceAccount` (`{name}-gateway`) unless `serviceAccount.name` is set
+globally or `gateway.serviceAccount.name` is set per component. Set
+`serviceAccount.create: false` (or `gateway.serviceAccount.create: false`) to reference an
+out-of-band account.
 
 ### Key parameters
 
 | Parameter | Description | Default |
 | --- | --- | --- |
+| `image.repository` | Hermes image | `nousresearch/hermes-agent` |
+| `image.tag` | Hermes image tag (pin for production) | `latest` |
 | `gateway.enabled` | Deploy the gateway workload | `true` |
-| `gateway.replicaCount` | Gateway replicas | `1` |
-| `gateway.image.repository` | Gateway image repository | `ghcr.io/geee-be/hermes-gateway` |
-| `gateway.image.tag` | Gateway image tag | `0.1.0` |
-| `gateway.service.type` | Gateway service type | `ClusterIP` |
-| `gateway.service.port` | Gateway service port | `8080` |
-| `gateway.resources` | Gateway resource requests/limits | see `values.yaml` |
-| `gateway.autoscaling.enabled` | Enable HPA for the gateway | `false` |
-| `gateway.persistence.enabled` | Create and mount a PVC for gateway state (sets `HERMES_HOME`) | `true` |
-| `gateway.persistence.mountPath` | Where gateway state is mounted (and `HERMES_HOME` points to) | `/opt/data` |
-| `gateway.persistence.size` | Gateway PVC size | `1Gi` |
-| `dashboard.enabled` | Deploy the dashboard workload | `true` |
-| `dashboard.replicaCount` | Dashboard replicas | `1` |
-| `dashboard.image.repository` | Dashboard image repository | `ghcr.io/geee-be/hermes-dashboard` |
-| `dashboard.image.tag` | Dashboard image tag | `0.1.0` |
-| `dashboard.service.port` | Dashboard service port | `3000` |
-| `dashboard.persistence.enabled` | Create and mount a PVC for dashboard state | `false` |
-| `config.enabled` | Create the shared ConfigMap and wire it into both workloads | `true` |
-| `config.data` | Shared config map data (exposed as env vars via `envFrom`) | `{}` |
-| `secret.enabled` | Create a shared Secret and wire it into both workloads | `false` |
-| `secret.stringData` | Secret values (base64-encoded in `secret.data` when pre-encoded) | `{}` |
+| `gateway.replicaCount` | Gateway replicas (keep `1` with persistence) | `1` |
+| `gateway.command` | Container command | `["gateway", "run"]` |
+| `gateway.apiServer.enabled` | Enable the OpenAI-compatible API server | `true` |
+| `gateway.apiServer.host` / `port` | API server bind address / port | `0.0.0.0` / `8642` |
+| `gateway.apiServer.key` | API server bearer key | `""` |
+| `gateway.service.type` / `port` | Gateway service type / port | `ClusterIP` / `8642` |
+| `gateway.resources` | Gateway requests/limits | `1Gi`/`1` cpu … `4Gi`/`2` cpu |
+| `gateway.dashboard.enabled` | Enable the in-pod dashboard | `false` |
+| `gateway.dashboard.port` | Dashboard port | `9119` |
+| `gateway.dashboard.auth.basicAuth.*` | Dashboard basic-auth provider | empty |
+| `gateway.persistence.enabled` | Create/mount a PVC (sets `HERMES_HOME`) | `true` |
+| `gateway.persistence.mountPath` | State mount path / `HERMES_HOME` | `/opt/data` |
+| `gateway.persistence.size` | PVC size | `2Gi` |
+| `gateway.autoscaling.enabled` | Create an HPA (keep `maxReplicas: 1` with persistence) | `false` |
+| `config.enabled` | Create the shared ConfigMap (`envFrom`) | `true` |
+| `secret.enabled` | Create the shared Secret (`envFrom`) | `false` |
 | `ingress.enabled` | Create an Ingress | `false` |
-| `ingress.hosts` | Ingress host/path rules | see `values.yaml` |
-| `podDisruptionBudget.enabled` | Create PodDisruptionBudgets | `false` |
-| `networkPolicy.enabled` | Create NetworkPolicies (default-deny, same-namespace traffic allowed) | `false` |
-| `networkPolicy.extraIngressRules` | Extra ingress rules (beyond the default same-namespace rule) | `[]` |
-| `networkPolicy.extraEgressRules` | Extra egress rules for outbound traffic | `[]` |
-| `serviceAccount.name` | Global ServiceAccount name override | `""` |
+| `podDisruptionBudget.enabled` | Create a PDB | `false` |
+| `networkPolicy.enabled` | Create default-deny NetworkPolicies | `false` |
 
 Full parameter reference is in `chart/values.yaml`.
 
 > **Autoscaling**: an HPA is only created when `autoscaling.enabled=true` **and** at least
-> one of `targetCPUUtilizationPercentage` / `targetMemoryUtilizationPercentage` is set.
-> Enabling autoscaling with both targets unset silently creates no HPA.
+> one CPU/memory target is set. With persistence (RWO) the chart caps `maxReplicas: 1`.
 >
-> **PodDisruptionBudget**: the default `podDisruptionBudget.minAvailable: 1` with
-> `replicaCount: 1` blocks voluntary evictions (node drains, cluster autoscaling). Only
-> enable PDBs when you run multiple replicas, or set `minAvailable: 0`.
->
-> **Default images**: `ghcr.io/geee-be/hermes-gateway:0.1.0` and
-> `ghcr.io/geee-be/hermes-dashboard:0.1.0` are assumed to be published and pullable by the
-> cluster; if the images are private or unpublished, set `gateway.image.repository` /
-> `dashboard.image.repository` to your published registry.
-
-### Deploying with a custom gateway tag and 3 replicas
-
-```bash
-helm install hermes ./chart \
-  --set gateway.image.tag=1.2.3 \
-  --set gateway.replicaCount=3 \
-  --set dashboard.image.tag=1.2.3
-```
+> **PodDisruptionBudget**: `minAvailable: 1` with `replicaCount: 1` blocks voluntary
+> evictions; only enable PDBs with multiple replicas or set `minAvailable: 0`.
 
 ### Enabling ingress
 
-Use a values file to keep hosts, paths, and TLS together — this is the most
-robust form and avoids Helm `--set` array-replacement pitfalls:
-
 ```bash
-helm install hermes ./chart \
-  --set ingress.enabled=true \
-  -f ingress-values.yaml
+helm install hermes ./chart --set ingress.enabled=true -f ingress-values.yaml
 ```
 
 ```yaml
@@ -211,52 +203,41 @@ ingress:
         - path: /
           pathType: Prefix
           service: gateway
-          port: http
+          port: api
+        - path: /dashboard
+          pathType: Prefix
+          service: dashboard
+          port: dashboard
 ```
 
-You can also enable ingress with a single `--set` flag; any host without an
-explicit `paths` list defaults to `/{Prefix}` routed to the gateway:
+### NetworkPolicy
 
-```bash
-helm install hermes ./chart \
-  --set ingress.enabled=true \
-  --set ingress.className=nginx \
-  --set 'ingress.hosts[0].host=hermes.example.com'
-```
-
-### Sealing the gateway behind the dashboard
-
-NetworkPolicies are **default-deny** for both ingress and egress when
-`networkPolicy.enabled=true`. The default rules keep the two workloads able to talk to each
-other while denying everything else:
-
-- **Ingress** — each workload allows traffic from any pod in the same namespace
-  (`podSelector: {}`), so the dashboard can reach the gateway and vice-versa. Ingress from
-  other namespaces is denied unless added via `networkPolicy.extraIngressRules`.
-- **Egress** — DNS lookups (port 53 TCP/UDP) to any namespace, plus all traffic within the
-  release namespace (so the dashboard can reach the gateway and vice-versa).
-
-To restrict ingress to the dashboard namespace only, add an explicit
-`networkPolicy.extraIngressRules` rule; the default same-namespace rule always applies, so
-the app keeps working.
-
-Any other outbound traffic (for example the gateway calling an external API) must be added
-via `networkPolicy.extraEgressRules`, e.g.:
-
-```bash
-helm install hermes ./chart \
-  --set networkPolicy.enabled=true \
-  --set 'networkPolicy.extraEgressRules[0].to[0].ipBlock.cidr=0.0.0.0/0'
-```
+`networkPolicy.enabled=true` applies default-deny with DNS egress (port 53) and
+same-namespace traffic allowed; extend with `networkPolicy.extraIngressRules` /
+`extraEgressRules` (e.g. the gateway calling an external model API).
 
 ## Verifying the release
 
-`helm test` runs a smoke pod per workload that wgets the workload's health endpoint
-(`livenessProbe.path`, default `/healthz`) as an unprivileged user and succeeds only on a
-2xx response:
+`helm test` runs a smoke pod that requests the gateway API server's health endpoint
+(`GET /health` on the gateway service) as an unprivileged user and succeeds on a 2xx
+response. This requires a configured gateway (API key set):
 
 ```bash
 helm test hermes
+```
+
+The state-write contract is asserted in CI: the workflow runs the real
+`nousresearch/hermes-agent` image against an empty volume and verifies it boots and writes
+`config.yaml` and `state.db` (SQLite) owned by uid 10000. To reproduce locally:
+
+```bash
+docker run -d --rm --name hermes-smoke \
+  -v "$(mktemp -d)":/opt/data \
+  -e API_SERVER_ENABLED=true -e API_SERVER_HOST=0.0.0.0 -e API_SERVER_KEY=testkey123 \
+  nousresearch/hermes-agent:latest gateway run
+sleep 15
+docker exec hermes-smoke sh -c 'test -f /opt/data/state.db && test -f /opt/data/config.yaml \
+  && [ "$(stat -c %u /opt/data/state.db)" = 10000 ] && echo "state write OK"'
 ```
 
 ## Development
@@ -265,4 +246,5 @@ helm test hermes
 helm lint ./chart
 helm template hermes ./chart
 kubectl apply --dry-run=client --validate=true -f <(helm template hermes ./chart)
+kubeconform -strict <(helm template hermes ./chart)
 ```

@@ -23,7 +23,7 @@ spec:
     - host: {{ .host }}
       http:
         paths:
-          {{- $paths := .paths | default (list (dict "path" "/" "pathType" "Prefix" "service" "gateway" "port" "http")) }}
+          {{- $paths := .paths | default (list (dict "path" "/" "pathType" "Prefix" "service" "gateway" "port" "api")) }}
           {{- range $paths }}
           - path: {{ .path }}
             pathType: {{ .pathType }}
@@ -31,7 +31,7 @@ spec:
               service:
                 name: {{ include "hermes.fullname" $ }}-{{ .service }}
                 port:
-                  name: {{ .port | default "http" }}
+                  name: {{ .port | default "api" }}
           {{- end }}
     {{- end }}
 {{- end }}

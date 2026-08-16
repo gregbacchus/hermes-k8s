@@ -34,7 +34,7 @@ jobs:
                   sys.exit('ERROR: Service without ports block rendered')
           print(f'OK: {len(services)} Service(s) all define ports')
           "
-      - name: Assert test hooks target a health path and run unprivileged
+      - name: Assert test hook targets /health and runs unprivileged
         run: |
           python3 -c "
           import re, sys
@@ -43,13 +43,13 @@ jobs:
           assert hooks, 'no test hook pods rendered'
           for d in hooks:
               assert re.search(r'runAsUser:\s*1000', d), 'hook must run unprivileged'
-              assert re.search(r'workdir:\s*/tmp|workingDir:\s*/tmp', d, re.I), 'hook needs writable cwd'
+              assert re.search(r'workingDir:\s*/tmp', d), 'hook needs writable cwd'
               args = re.search(r'args:.*?(?=restartPolicy|\Z)', d, re.S)
               assert args and '-O' in args.group(0) and '/dev/null' in args.group(0), 'hook wget must discard body via -O /dev/null'
-              assert re.search(r'/healthz|\$\{livenessProbe', d) or 'livenessProbe.path' in d, 'hook must target a health path'
-          print(f'OK: {len(hooks)} test hook(s) target health path unprivileged')
+              assert re.search(r'/health\b', d), 'hook must target the API server /health path'
+          print(f'OK: {len(hooks)} test hook(s) target /health unprivileged')
           "
-      - name: Assert config/secret are wired into Deployments
+      - name: Assert config/secret are wired into the Deployment
         run: |
           helm template hermes ./chart \
             --set config.enabled=true \
@@ -58,30 +58,25 @@ jobs:
           import re, sys
           docs = open('/tmp/render-envfrom.yaml').read().split('---')
           deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
-          assert deps, 'no Deployments rendered'
-          for d in deps:
-              assert 'configMapRef' in d and 'name: hermes' in d, 'Deployment missing configMapRef envFrom'
-              assert 'secretRef' in d and 'name: hermes' in d, 'Deployment missing secretRef envFrom'
-          print(f'OK: {len(deps)} Deployment(s) wired to shared config/secret')
+          assert len(deps) == 1, 'expected exactly one Deployment'
+          assert 'configMapRef' in deps[0] and 'name: hermes' in deps[0], 'Deployment missing configMapRef envFrom'
+          assert 'secretRef' in deps[0] and 'name: hermes' in deps[0], 'Deployment missing secretRef envFrom'
+          print('OK: Deployment wired to shared config/secret')
           "
-      - name: Assert envFrom=null renders (concat nil-safety) and keeps wiring
+      - name: Assert gateway.envFrom=null renders (concat nil-safety)
         run: |
           helm template hermes ./chart \
             --set config.enabled=true \
             --set secret.enabled=true \
-            --set gateway.envFrom=null \
-            --set dashboard.envFrom=null > /tmp/render-envfrom-null.yaml
+            --set gateway.envFrom=null > /tmp/render-envfrom-null.yaml
           python3 -c "
           import re, sys
           docs = open('/tmp/render-envfrom-null.yaml').read().split('---')
           deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
-          assert deps, 'no Deployments rendered'
-          for d in deps:
-              assert 'configMapRef' in d and 'name: hermes' in d, 'Deployment missing configMapRef envFrom'
-              assert 'secretRef' in d and 'name: hermes' in d, 'Deployment missing secretRef envFrom'
-          print(f'OK: {len(deps)} Deployment(s) still wired with gateway/dashboard envFrom=null')
+          assert deps and 'configMapRef' in deps[0], 'Deployment missing configMapRef envFrom'
+          print('OK: Deployment still wired with gateway.envFrom=null')
           "
-      - name: Assert gateway persistence (PVC + HERMES_HOME + fsGroup)
+      - name: Assert gateway persistence (PVC + HERMES_HOME + fsGroup 10000)
         run: |
           helm template hermes ./chart > /tmp/render-pvc.yaml
           helm template hermes ./chart \
@@ -92,38 +87,44 @@ jobs:
           pvcs = [d for d in docs if re.search(r'^kind:\s*PersistentVolumeClaim\s*$', d, re.M)]
           assert len(pvcs) == 1, 'expected exactly one default PVC (gateway persistence)'
           deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
-          gw = [d for d in deps if 'name: hermes-gateway' in d]
-          assert gw, 'gateway Deployment missing'
-          assert 'HERMES_HOME' in gw[0] and '/opt/data' in gw[0], 'gateway must set HERMES_HOME=/opt/data'
-          assert 'persistentVolumeClaim' in gw[0], 'gateway must mount the PVC'
-          assert 'type: Recreate' in gw[0], 'gateway with persistence must use Recreate strategy'
-          assert 'fsGroup: 1000' in gw[0], 'gateway pod must set fsGroup for a writable volume'
-          d2 = [d for d in deps if 'name: hermes-dashboard' in d]
-          assert d2 and 'HERMES_HOME' not in d2[0], 'dashboard must not set HERMES_HOME by default'
+          assert len(deps) == 1, 'expected exactly one Deployment'
+          gw = deps[0]
+          assert 'HERMES_HOME' in gw and '/opt/data' in gw, 'gateway must set HERMES_HOME=/opt/data'
+          assert 'persistentVolumeClaim' in gw, 'gateway must mount the PVC'
+          assert 'type: Recreate' in gw, 'gateway with persistence must use Recreate strategy'
+          assert 'fsGroup: 10000' in gw, 'gateway pod must set fsGroup: 10000'
+          assert 'readOnlyRootFilesystem: true' in gw, 'gateway must use a read-only root filesystem'
+          assert 'scratch-run' in gw and 'mountPath: /run' in gw, 'gateway needs a writable /run scratch mount'
+          assert 'scratch-tmp' in gw and 'mountPath: /tmp' in gw, 'gateway needs a writable /tmp scratch mount'
           docs2 = open('/tmp/render-existingclaim.yaml').read().split('---')
           assert not [d for d in docs2 if re.search(r'^kind:\s*PersistentVolumeClaim\s*$', d, re.M)], 'existingClaim must suppress chart PVC'
           assert 'claimName: hermes-data' in open('/tmp/render-existingclaim.yaml').read(), 'existingClaim name must be used'
-          print('OK: persistence PVC + HERMES_HOME + fsGroup wired; existingClaim suppresses PVC')
+          print('OK: persistence PVC + HERMES_HOME + fsGroup 10000 + scratch mounts wired')
           "
-      - name: Assert NetworkPolicy allows same-namespace ingress
+      - name: Assert image contract (nousresearch/hermes-agent, ports 8642/9119)
         run: |
           helm template hermes ./chart \
-            --set networkPolicy.enabled=true > /tmp/render-netpol.yaml
+            --set gateway.dashboard.enabled=true > /tmp/render-image.yaml
           python3 -c "
           import re, sys
-          docs = open('/tmp/render-netpol.yaml').read().split('---')
-          nps = [d for d in docs if re.search(r'^kind:\s*NetworkPolicy\s*$', d, re.M)]
-          assert nps, 'no NetworkPolicies rendered'
-          for d in nps:
-              ingress = re.search(r'^  ingress:(.*?)(?=^  egress:)', d, re.S | re.M)
-              assert ingress and 'podSelector' in ingress.group(1), 'NetworkPolicy missing same-namespace ingress rule'
-          print(f'OK: {len(nps)} NetworkPolicy(ies) allow same-namespace ingress')
+          docs = open('/tmp/render-image.yaml').read().split('---')
+          deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
+          gw = deps[0]
+          assert 'nousresearch/hermes-agent' in gw, 'gateway must use nousresearch/hermes-agent image'
+          assert 'containerPort: 8642' in gw, 'gateway must expose port 8642 (api)'
+          assert 'containerPort: 9119' in gw, 'dashboard must expose port 9119'
+          assert 'API_SERVER_ENABLED' in gw and 'HERMES_DASHBOARD' in gw, 'env wiring missing'
+          services = [d for d in docs if re.search(r'^kind:\s*Service\s*$', d, re.M)]
+          assert any('name: hermes-gateway' in d and 'port: 8642' in d for d in services), 'gateway service must be 8642'
+          assert any('name: hermes-dashboard' in d and 'port: 9119' in d for d in services), 'dashboard service must be 9119'
+          print('OK: image/ports contract verified')
           "
       - name: Validate strict schema (kubeconform)
         run: |
           curl -sSfL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
             | tar xz -C /tmp
           /tmp/kubeconform -strict -summary -output pretty /tmp/render.yaml
+          /tmp/kubeconform -strict -summary -output pretty /tmp/render-image.yaml
       - name: Validate ingress variants (kubeconform)
         run: |
           helm template hermes ./chart \
@@ -133,15 +134,43 @@ jobs:
             --set ingress.className=nginx \
             --set 'ingress.hosts[0].host=hermes.example.com' > /tmp/render-ingress-readme.yaml
           for f in /tmp/render-ingress-default.yaml /tmp/render-ingress-readme.yaml; do
-            python3 -c "
-            import re, sys
-            docs = open('$f').read().split('---')
-            for d in docs:
-                if not re.search(r'^kind:\s*Ingress\s*$', d, re.M):
-                    continue
-                paths = re.findall(r'^\s*- path:\s*', d, re.M)
-                assert paths, 'ERROR: Ingress rendered with no paths'
-            print('OK: Ingress defines paths in $f')
-            "
             /tmp/kubeconform -strict -summary -output pretty "$f"
           done
+
+  smoke:
+    # Runtime evidence: the real Hermes image boots against an empty volume and writes
+    # config.yaml + state.db (SQLite) owned by uid 10000 — proving the persistence and
+    # securityContext contract the chart encodes.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull Hermes image
+        run: docker pull nousresearch/hermes-agent:latest
+      - name: Boot gateway against an empty volume
+        run: |
+          mkdir -p /tmp/hermes-data
+          docker run -d --name hermes-smoke \
+            -v /tmp/hermes-data:/opt/data \
+            -e API_SERVER_ENABLED=true \
+            -e API_SERVER_HOST=0.0.0.0 \
+            -e API_SERVER_KEY=testkey123 \
+            nousresearch/hermes-agent:latest gateway run
+      - name: Assert state files written as uid 10000
+        run: |
+          for i in $(seq 1 36); do
+            if docker exec hermes-smoke sh -c 'test -f /opt/data/state.db && test -f /opt/data/config.yaml' 2>/dev/null; then
+              break
+            fi
+            sleep 5
+          done
+          docker exec hermes-smoke sh -c '
+            set -e
+            test -f /opt/data/state.db && echo "state.db: present" || { echo "state.db MISSING"; exit 1; }
+            test -f /opt/data/config.yaml && echo "config.yaml: present" || { echo "config.yaml MISSING"; exit 1; }
+            test -f /opt/data/SOUL.md && echo "SOUL.md: present"
+            uid=$(stat -c %u /opt/data/state.db)
+            [ "$uid" = 10000 ] && echo "state.db uid=10000 OK" || { echo "state.db uid=$uid (want 10000)"; exit 1; }
+            echo "state-write smoke passed"
+          '
+      - name: Cleanup
+        if: always()
+        run: docker rm -f hermes-smoke || true

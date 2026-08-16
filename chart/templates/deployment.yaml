@@ -1,54 +1,48 @@
-{{- $root := . }}
-{{- $components := list (dict "name" "gateway" "values" .Values.gateway) (dict "name" "dashboard" "values" .Values.dashboard) }}
-{{- range $components }}
-{{- if .values.enabled }}
-{{- $component := .name }}
-{{- $compValues := .values }}
-{{- with $root }}
+{{- if .Values.gateway.enabled }}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "hermes.fullname" . }}-{{ $component }}
+  name: {{ include "hermes.fullname" . }}-gateway
   labels:
-    {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" $component)) | nindent 4 }}
-  {{- with $compValues.annotations }}
+    {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" "gateway")) | nindent 4 }}
+  {{- with .Values.gateway.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  replicas: {{ $compValues.replicaCount }}
-  {{- if and $compValues.persistence.enabled (gt (int $compValues.replicaCount) 1) }}
-  {{- fail (printf "%s.persistence is a ReadWriteOnce volume that can attach to only one pod at a time. Set %s.replicaCount: 1, or switch to ReadWriteMany / external storage before scaling." $component $component) }}
+  replicas: {{ .Values.gateway.replicaCount }}
+  {{- if and .Values.gateway.persistence.enabled (gt (int .Values.gateway.replicaCount) 1) }}
+  {{- fail "gateway.persistence is a ReadWriteOnce volume that can attach to only one pod at a time. Set gateway.replicaCount: 1, or switch to ReadWriteMany / external storage before scaling." }}
   {{- end }}
-  {{- if $compValues.strategy }}
+  {{- if .Values.gateway.strategy }}
   strategy:
-    {{- toYaml $compValues.strategy | nindent 4 }}
-  {{- else if $compValues.persistence.enabled }}
+    {{- toYaml .Values.gateway.strategy | nindent 4 }}
+  {{- else if .Values.gateway.persistence.enabled }}
   strategy:
     type: Recreate
   {{- end }}
   selector:
     matchLabels:
-      {{- include "hermes.componentSelectorLabels" (merge (deepCopy .) (dict "component" $component)) | nindent 6 }}
+      {{- include "hermes.componentSelectorLabels" (merge (deepCopy .) (dict "component" "gateway")) | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" $component)) | nindent 8 }}
-        {{- with $compValues.podLabels }}
+        {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" "gateway")) | nindent 8 }}
+        {{- with .Values.gateway.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- $podAnnotations := include "hermes.podAnnotations" (merge (deepCopy .) (dict "component" $component)) | fromYaml }}
+      {{- $podAnnotations := include "hermes.podAnnotations" (merge (deepCopy .) (dict "component" "gateway")) | fromYaml }}
       {{- if $podAnnotations }}
       annotations:
         {{- toYaml $podAnnotations | nindent 8 }}
       {{- end }}
     spec:
-      {{- with $compValues.priorityClassName }}
+      {{- with .Values.gateway.priorityClassName }}
       priorityClassName: {{ . }}
       {{- end }}
-      serviceAccountName: {{ include "hermes.serviceAccountName" (merge (deepCopy .) (dict "component" $component)) }}
-      {{- with $compValues.podSecurityContext }}
+      serviceAccountName: {{ include "hermes.serviceAccountName" (merge (deepCopy .) (dict "component" "gateway")) }}
+      {{- with .Values.gateway.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -56,7 +50,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with $compValues.terminationGracePeriodSeconds }}
+      {{- with .Values.gateway.terminationGracePeriodSeconds }}
       terminationGracePeriodSeconds: {{ . }}
       {{- end }}
       {{- with .Values.nodeSelector }}
@@ -71,49 +65,102 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with $compValues.topologySpreadConstraints }}
+      {{- with .Values.gateway.topologySpreadConstraints }}
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if or $compValues.persistence.enabled $compValues.extraVolumes }}
+      {{- if or .Values.gateway.persistence.enabled .Values.gateway.scratch.run.enabled .Values.gateway.scratch.tmp.enabled .Values.gateway.extraVolumes }}
       volumes:
-        {{- if $compValues.persistence.enabled }}
-        - name: {{ $component }}-data
+        {{- if .Values.gateway.persistence.enabled }}
+        - name: gateway-data
           persistentVolumeClaim:
-            claimName: {{ if $compValues.persistence.existingClaim }}{{ $compValues.persistence.existingClaim }}{{ else }}{{ include "hermes.fullname" . }}-{{ $component }}{{ end }}
+            claimName: {{ if .Values.gateway.persistence.existingClaim }}{{ .Values.gateway.persistence.existingClaim }}{{ else }}{{ include "hermes.fullname" . }}-gateway{{ end }}
         {{- end }}
-        {{- with $compValues.extraVolumes }}
+        {{- if .Values.gateway.scratch.run.enabled }}
+        - name: scratch-run
+          emptyDir: {{ toYaml .Values.gateway.scratch.run.emptyDir | nindent 12 }}
+        {{- end }}
+        {{- if .Values.gateway.scratch.tmp.enabled }}
+        - name: scratch-tmp
+          emptyDir: {{ toYaml .Values.gateway.scratch.tmp.emptyDir | nindent 12 }}
+        {{- end }}
+        {{- with .Values.gateway.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       {{- end }}
       containers:
-        - name: {{ $component }}
-          image: "{{ $compValues.image.repository }}:{{ $compValues.image.tag }}"
-          imagePullPolicy: {{ $compValues.image.pullPolicy }}
-          {{- with $compValues.command }}
+        - name: gateway
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.gateway.command }}
           command:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with $compValues.args }}
+          {{- with .Values.gateway.args }}
           args:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with $compValues.containerSecurityContext }}
+          {{- with .Values.gateway.containerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           ports:
-            {{- toYaml $compValues.ports | nindent 12 }}
-          {{- if or $compValues.env $compValues.persistence.enabled }}
-          env:
-            {{- if $compValues.persistence.enabled }}
-            - name: HERMES_HOME
-              value: {{ $compValues.persistence.mountPath | quote }}
+            {{- toYaml .Values.gateway.ports | nindent 12 }}
+            {{- if .Values.gateway.dashboard.enabled }}
+            - name: dashboard
+              containerPort: {{ .Values.gateway.dashboard.port }}
+              protocol: TCP
             {{- end }}
-            {{- with $compValues.env }}
+          env:
+            {{- if .Values.gateway.persistence.enabled }}
+            - name: HERMES_HOME
+              value: {{ .Values.gateway.persistence.mountPath | quote }}
+            {{- end }}
+            {{- if .Values.gateway.apiServer.enabled }}
+            - name: API_SERVER_ENABLED
+              value: "true"
+            - name: API_SERVER_HOST
+              value: {{ .Values.gateway.apiServer.host | quote }}
+            - name: API_SERVER_PORT
+              value: {{ .Values.gateway.apiServer.port | quote }}
+            {{- if .Values.gateway.apiServer.keySecretRef.name }}
+            - name: API_SERVER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.gateway.apiServer.keySecretRef.name }}
+                  key: {{ .Values.gateway.apiServer.keySecretRef.key }}
+            {{- else if .Values.gateway.apiServer.key }}
+            - name: API_SERVER_KEY
+              value: {{ .Values.gateway.apiServer.key | quote }}
+            {{- end }}
+            {{- if .Values.gateway.apiServer.corsOrigins }}
+            - name: API_SERVER_CORS_ORIGINS
+              value: {{ .Values.gateway.apiServer.corsOrigins | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.gateway.dashboard.enabled }}
+            - name: HERMES_DASHBOARD
+              value: "1"
+            - name: HERMES_DASHBOARD_HOST
+              value: {{ .Values.gateway.dashboard.host | quote }}
+            - name: HERMES_DASHBOARD_PORT
+              value: {{ .Values.gateway.dashboard.port | quote }}
+            {{- if .Values.gateway.dashboard.auth.basicAuth.username }}
+            - name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
+              value: {{ .Values.gateway.dashboard.auth.basicAuth.username | quote }}
+            {{- end }}
+            {{- if .Values.gateway.dashboard.auth.basicAuth.password }}
+            - name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
+              value: {{ .Values.gateway.dashboard.auth.basicAuth.password | quote }}
+            {{- end }}
+            {{- if .Values.gateway.dashboard.auth.basicAuth.secret }}
+            - name: HERMES_DASHBOARD_BASIC_AUTH_SECRET
+              value: {{ .Values.gateway.dashboard.auth.basicAuth.secret | quote }}
+            {{- end }}
+            {{- end }}
+            {{- with .Values.gateway.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- end }}
           {{- $envFrom := list }}
           {{- if .Values.config.enabled }}
           {{- $envFrom = append $envFrom (dict "configMapRef" (dict "name" (include "hermes.fullname" .))) }}
@@ -121,55 +168,61 @@ spec:
           {{- if .Values.secret.enabled }}
           {{- $envFrom = append $envFrom (dict "secretRef" (dict "name" (include "hermes.fullname" .))) }}
           {{- end }}
-          {{- $envFrom = concat $envFrom (default (list) $compValues.envFrom) }}
+          {{- $envFrom = concat $envFrom (default (list) .Values.gateway.envFrom) }}
           {{- if $envFrom }}
           envFrom:
             {{- toYaml $envFrom | nindent 12 }}
           {{- end }}
-          {{- with $compValues.lifecycle }}
+          {{- with .Values.gateway.lifecycle }}
           lifecycle:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with $compValues.resources }}
+          {{- with .Values.gateway.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if $compValues.startupProbe }}
+          {{- if .Values.gateway.startupProbe }}
           startupProbe:
-            {{- toYaml $compValues.startupProbe | nindent 12 }}
-          {{- else if $compValues.livenessProbe.enabled }}
+            {{- toYaml .Values.gateway.startupProbe | nindent 12 }}
+          {{- else if .Values.gateway.livenessProbe.enabled }}
           livenessProbe:
             httpGet:
-              path: {{ $compValues.livenessProbe.path }}
-              port: {{ $compValues.livenessProbe.port }}
-            initialDelaySeconds: {{ $compValues.livenessProbe.initialDelaySeconds }}
-            periodSeconds: {{ $compValues.livenessProbe.periodSeconds }}
-            timeoutSeconds: {{ $compValues.livenessProbe.timeoutSeconds }}
-            failureThreshold: {{ $compValues.livenessProbe.failureThreshold }}
+              path: {{ .Values.gateway.livenessProbe.path }}
+              port: {{ .Values.gateway.livenessProbe.port }}
+            initialDelaySeconds: {{ .Values.gateway.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.gateway.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.gateway.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.gateway.livenessProbe.failureThreshold }}
           {{- end }}
-          {{- if $compValues.readinessProbe.enabled }}
+          {{- if .Values.gateway.readinessProbe.enabled }}
           readinessProbe:
             httpGet:
-              path: {{ $compValues.readinessProbe.path }}
-              port: {{ $compValues.readinessProbe.port }}
-            initialDelaySeconds: {{ $compValues.readinessProbe.initialDelaySeconds }}
-            periodSeconds: {{ $compValues.readinessProbe.periodSeconds }}
-            timeoutSeconds: {{ $compValues.readinessProbe.timeoutSeconds }}
-            failureThreshold: {{ $compValues.readinessProbe.failureThreshold }}
+              path: {{ .Values.gateway.readinessProbe.path }}
+              port: {{ .Values.gateway.readinessProbe.port }}
+            initialDelaySeconds: {{ .Values.gateway.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.gateway.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.gateway.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.gateway.readinessProbe.failureThreshold }}
           {{- end }}
-          {{- if or $compValues.persistence.enabled $compValues.extraVolumeMounts }}
+          {{- if or .Values.gateway.persistence.enabled .Values.gateway.scratch.run.enabled .Values.gateway.scratch.tmp.enabled .Values.gateway.extraVolumeMounts }}
           volumeMounts:
-            {{- if $compValues.persistence.enabled }}
-            - name: {{ $component }}-data
-              mountPath: {{ $compValues.persistence.mountPath }}
-              {{- if $compValues.persistence.subPath }}
-              subPath: {{ $compValues.persistence.subPath }}
+            {{- if .Values.gateway.persistence.enabled }}
+            - name: gateway-data
+              mountPath: {{ .Values.gateway.persistence.mountPath }}
+              {{- if .Values.gateway.persistence.subPath }}
+              subPath: {{ .Values.gateway.persistence.subPath }}
               {{- end }}
             {{- end }}
-            {{- with $compValues.extraVolumeMounts }}
+            {{- if .Values.gateway.scratch.run.enabled }}
+            - name: scratch-run
+              mountPath: /run
+            {{- end }}
+            {{- if .Values.gateway.scratch.tmp.enabled }}
+            - name: scratch-tmp
+              mountPath: /tmp
+            {{- end }}
+            {{- with .Values.gateway.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
           {{- end }}
-{{- end }}
-{{- end }}
 {{- end }}

@@ -1,17 +1,11 @@
-{{- $root := . }}
-{{- $components := list (dict "name" "gateway" "values" .Values.gateway) (dict "name" "dashboard" "values" .Values.dashboard) }}
-{{- range $components }}
-{{- if .values.enabled }}
-{{- $component := .name }}
-{{- $compValues := .values }}
-{{- with $root }}
+{{- if .Values.gateway.enabled }}
 ---
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "{{ include "hermes.fullname" . }}-{{ $component }}-test-connection"
+  name: "{{ include "hermes.fullname" . }}-gateway-test-connection"
   labels:
-    {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" $component)) | nindent 4 }}
+    {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" "gateway")) | nindent 4 }}
   annotations:
     "helm.sh/hook": test
 spec:
@@ -25,8 +19,6 @@ spec:
       imagePullPolicy: IfNotPresent
       workingDir: /tmp
       command: ['wget']
-      args: ['--timeout=5', '--tries=1', '-O', '/dev/null', 'http://{{ include "hermes.fullname" . }}-{{ $component }}:{{ $compValues.service.port }}{{ $compValues.livenessProbe.path }}']
+      args: ['--timeout=5', '--tries=1', '-O', '/dev/null', 'http://{{ include "hermes.fullname" . }}-gateway:{{ .Values.gateway.service.port }}{{ .Values.gateway.livenessProbe.path }}']
   restartPolicy: Never
-{{- end }}
-{{- end }}
 {{- end }}

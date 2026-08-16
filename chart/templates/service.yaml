@@ -1,33 +1,50 @@
-{{- $root := . }}
-{{- $components := list (dict "name" "gateway" "values" .Values.gateway) (dict "name" "dashboard" "values" .Values.dashboard) }}
-{{- range $components }}
-{{- if .values.enabled }}
-{{- $component := .name }}
-{{- $compValues := .values }}
-{{- with $root }}
+{{- if .Values.gateway.enabled }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "hermes.fullname" . }}-{{ $component }}
+  name: {{ include "hermes.fullname" . }}-gateway
   labels:
-    {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" $component)) | nindent 4 }}
-  {{- with $compValues.service.annotations }}
+    {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" "gateway")) | nindent 4 }}
+  {{- with .Values.gateway.service.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  type: {{ $compValues.service.type }}
+  type: {{ .Values.gateway.service.type }}
   ports:
-    - name: http
-      port: {{ $compValues.service.port }}
-      targetPort: {{ $compValues.service.targetPort }}
+    - name: {{ .Values.gateway.service.targetPort }}
+      port: {{ .Values.gateway.service.port }}
+      targetPort: {{ .Values.gateway.service.targetPort }}
       protocol: TCP
-    {{- range $compValues.service.extraPorts }}
+    {{- range .Values.gateway.service.extraPorts }}
     - {{ toYaml . | nindent 6 | trimPrefix "  " }}
     {{- end }}
   selector:
-    {{- include "hermes.componentSelectorLabels" (merge (deepCopy .) (dict "component" $component)) | nindent 4 }}
+    {{- include "hermes.componentSelectorLabels" (merge (deepCopy .) (dict "component" "gateway")) | nindent 4 }}
 {{- end }}
-{{- end }}
+{{- if and .Values.gateway.enabled .Values.gateway.dashboard.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hermes.fullname" . }}-dashboard
+  labels:
+    {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" "dashboard")) | nindent 4 }}
+  {{- with .Values.gateway.dashboard.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.gateway.dashboard.service.type }}
+  ports:
+    - name: {{ .Values.gateway.dashboard.service.targetPort }}
+      port: {{ .Values.gateway.dashboard.service.port }}
+      targetPort: {{ .Values.gateway.dashboard.service.targetPort }}
+      protocol: TCP
+    {{- range .Values.gateway.dashboard.service.extraPorts }}
+    - {{ toYaml . | nindent 6 | trimPrefix "  " }}
+    {{- end }}
+  selector:
+    {{- include "hermes.componentSelectorLabels" (merge (deepCopy .) (dict "component" "gateway")) | nindent 4 }}
 {{- end }}

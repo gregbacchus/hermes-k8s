@@ -1,22 +1,15 @@
-{{- if .Values.networkPolicy.enabled }}
-{{- $root := . }}
-{{- $components := list (dict "name" "gateway" "values" .Values.gateway) (dict "name" "dashboard" "values" .Values.dashboard) }}
-{{- range $components }}
-{{- if .values.enabled }}
-{{- $component := .name }}
-{{- $compValues := .values }}
-{{- with $root }}
+{{- if and .Values.networkPolicy.enabled .Values.gateway.enabled }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "hermes.fullname" . }}-{{ $component }}
+  name: {{ include "hermes.fullname" . }}-gateway
   labels:
-    {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" $component)) | nindent 4 }}
+    {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" "gateway")) | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      {{- include "hermes.componentSelectorLabels" (merge (deepCopy .) (dict "component" $component)) | nindent 6 }}
+      {{- include "hermes.componentSelectorLabels" (merge (deepCopy .) (dict "component" "gateway")) | nindent 6 }}
   policyTypes:
     - Ingress
     - Egress
@@ -39,7 +32,4 @@ spec:
     {{- with .Values.networkPolicy.extraEgressRules }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
-{{- end }}
-{{- end }}
-{{- end }}
 {{- end }}

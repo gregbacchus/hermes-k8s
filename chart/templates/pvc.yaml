@@ -1,34 +1,26 @@
-{{- $root := . }}
-{{- $components := list (dict "name" "gateway" "values" .Values.gateway) (dict "name" "dashboard" "values" .Values.dashboard) }}
-{{- range $components }}
-{{- if and .values.enabled .values.persistence.enabled (not .values.persistence.existingClaim) }}
-{{- $component := .name }}
-{{- $compValues := .values }}
-{{- with $root }}
+{{- if and .Values.gateway.enabled .Values.gateway.persistence.enabled (not .Values.gateway.persistence.existingClaim) }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ include "hermes.fullname" . }}-{{ $component }}
+  name: {{ include "hermes.fullname" . }}-gateway
   labels:
-    {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" $component)) | nindent 4 }}
-  {{- with $compValues.persistence.annotations }}
+    {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" "gateway")) | nindent 4 }}
+  {{- with .Values.gateway.persistence.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
   accessModes:
-    - {{ $compValues.persistence.accessMode }}
-  {{- if $compValues.persistence.storageClass }}
-  storageClassName: {{ $compValues.persistence.storageClass }}
+    - {{ .Values.gateway.persistence.accessMode }}
+  {{- if .Values.gateway.persistence.storageClass }}
+  storageClassName: {{ .Values.gateway.persistence.storageClass }}
   {{- end }}
-  {{- with $compValues.persistence.selector }}
+  {{- with .Values.gateway.persistence.selector }}
   selector:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   resources:
     requests:
-      storage: {{ $compValues.persistence.size }}
-{{- end }}
-{{- end }}
+      storage: {{ .Values.gateway.persistence.size }}
 {{- end }}

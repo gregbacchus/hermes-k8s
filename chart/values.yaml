@@ -1,11 +1,19 @@
 # Default values for the hermes chart.
 # This is a YAML-formatted file. Declare variables to be passed into your templates.
+#
+# Runtime contract (verified against the official `nousresearch/hermes-agent`
+# image — see the "Hermes runtime contract" section of the README):
+#   * One image runs BOTH the gateway and (optionally) the dashboard. The image's
+#     s6-overlay init starts as root to chown/seed `/opt/data`, then drops every
+#     supervised service to the `hermes` user (uid/gid 10000).
+#   * The gateway API server (OpenAI-compatible + `GET /health`) listens on 8642.
+#   * The dashboard listens on 9119 and is enabled with `HERMES_DASHBOARD=1`.
 
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
-## Service account configuration
+## Service account configuration (used by the gateway workload)
 serviceAccount:
   create: true
   annotations: {}
@@ -15,206 +23,184 @@ serviceAccount:
 commonLabels: {}
 commonAnnotations: {}
 
-## Pod-level settings applied to both gateway and dashboard
+## Pod-level settings applied to the gateway workload
 podAnnotations: {}
 podLabels: {}
 
-## Node and affinity settings applied to both workloads
+## Node and affinity settings applied to the gateway workload
 nodeSelector: {}
 tolerations: []
 affinity: {}
 
+## The single Hermes image used by the gateway (and its in-pod dashboard).
+## The official image is `nousresearch/hermes-agent`. Pin `tag` for production.
+image:
+  repository: nousresearch/hermes-agent
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
 ## ---------- Hermes Gateway ----------
+## One pod runs the Hermes agent (`gateway run`). The dashboard is a supervised
+## s6 service inside the SAME container (see `gateway.dashboard`), not a separate
+## Deployment — the official image requires a shared PID/network namespace for the
+## dashboard's gateway-liveness detection.
 gateway:
   enabled: true
   replicaCount: 1
   annotations: {}
   podAnnotations: {}
   podLabels: {}
-  image:
-    repository: ghcr.io/geee-be/hermes-gateway
-    tag: "0.1.0"
-    pullPolicy: IfNotPresent
-  command: []
+  command: ["gateway", "run"]
   args: []
   env: []
   envFrom: []
+
+  ## OpenAI-compatible API server (also serves the health endpoint). Requires a
+  ## `key` (min 8 chars) to start; Hermes fails closed without it. Prefer
+  ## `keySecretRef` (or the shared `secret.stringData.API_SERVER_KEY`) over `key`.
+  apiServer:
+    enabled: true
+    host: "0.0.0.0"
+    port: 8642
+    key: ""
+    keySecretRef:
+      name: ""
+      key: API_SERVER_KEY
+    corsOrigins: ""
+
   ports:
-    - name: http
-      containerPort: 8080
+    - name: api
+      containerPort: 8642
       protocol: TCP
+
   service:
     type: ClusterIP
-    port: 8080
-    targetPort: http
+    port: 8642
+    targetPort: api
     annotations: {}
     extraPorts: []
+
   serviceAccount:
     create: null
     name: ""
     annotations: null
+
+  ## Documented minimums: 1 GB RAM / 1 core (2 GB if browser tools are used).
   resources:
     requests:
-      cpu: 100m
-      memory: 128Mi
+      cpu: "1"
+      memory: 1Gi
     limits:
-      cpu: 500m
-      memory: 512Mi
+      cpu: "2"
+      memory: 4Gi
+
   autoscaling:
     enabled: false
     minReplicas: 1
-    maxReplicas: 5
+    maxReplicas: 1
     targetCPUUtilizationPercentage: 80
     targetMemoryUtilizationPercentage: null
+
+  ## The API server exposes `GET /health` (and `GET /v1/health`). It only responds
+  ## once Hermes is configured with a model/provider; until then the pod reports
+  ## NotReady but the gateway process itself keeps running.
   livenessProbe:
     enabled: true
-    path: /healthz
-    port: http
-    initialDelaySeconds: 10
+    path: /health
+    port: api
+    initialDelaySeconds: 30
     periodSeconds: 10
     timeoutSeconds: 2
     failureThreshold: 3
   readinessProbe:
     enabled: true
-    path: /readyz
-    port: http
-    initialDelaySeconds: 5
+    path: /health
+    port: api
+    initialDelaySeconds: 15
     periodSeconds: 5
     timeoutSeconds: 2
     failureThreshold: 3
   startupProbe: {}
-  ## Pod-level securityContext (runAsUser/runAsGroup/runAsNonRoot/fsGroup/seccompProfile/...)
+
+  ## In-pod dashboard, supervised by s6-overlay alongside the gateway. On a
+  ## non-loopback bind the dashboard fails closed until an auth provider is
+  ## configured (basic auth / OAuth / OIDC) — see the README.
+  dashboard:
+    enabled: false
+    host: "0.0.0.0"
+    port: 9119
+    service:
+      type: ClusterIP
+      port: 9119
+      targetPort: dashboard
+      annotations: {}
+      extraPorts: []
+    auth:
+      basicAuth:
+        username: ""
+        password: ""
+        secret: ""
+
+  ## Pod-level securityContext. The image MUST start as root so s6-overlay can
+  ## chown the data volume and drop to uid 10000; do NOT set runAsUser/runAsNonRoot
+  ## here. `fsGroup` matches the `hermes` user so the PVC is group-writable even
+  ## if the image's internal chown is skipped.
   podSecurityContext:
-    runAsNonRoot: true
-    runAsUser: 1000
-    runAsGroup: 1000
-    fsGroup: 1000
-  ## Container-level securityContext (capabilities, readOnlyRootFilesystem, allowPrivilegeEscalation, ...)
+    fsGroup: 10000
+    seccompProfile:
+      type: RuntimeDefault
+
+  ## Container-level securityContext. readOnlyRootFilesystem is safe because the
+  ## image keeps its install tree (`/opt/hermes`) immutable itself, and the chart
+  ## mounts writable scratch volumes for `/run` (s6) and `/tmp` (see `scratch`).
   containerSecurityContext:
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: true
     capabilities:
       drop:
         - ALL
+
+  ## Writable scratch volumes required under readOnlyRootFilesystem: true.
+  ## s6-overlay writes (and executes from) `/run`; the runtime uses `/tmp`.
+  ## `/run` must be a disk-backed emptyDir — a tmpfs `medium: Memory` is mounted
+  ## noexec and breaks s6-overlay's runtime binaries.
+  scratch:
+    run:
+      enabled: true
+      emptyDir: {}
+    tmp:
+      enabled: true
+      emptyDir: {}
+
   priorityClassName: ""
   topologySpreadConstraints: []
-  ## Durable storage for the gateway. Hermes persists its self-managed state (config,
-  ## .env, sessions, memories, skills, cron, logs) under HERMES_HOME, which the chart
-  ## points at `mountPath`. The official Hermes layout uses `/opt/data` (the container's
-  ## mutable state dir; `/opt/hermes` stays an immutable, read-only install tree).
-  ## A ReadWriteOnce volume attaches to only one pod, so with persistence enabled the
-  ## gateway runs as a single replica with a `Recreate` rollout strategy (see `strategy`).
+
+  ## Durable storage for Hermes self-managed state. Hermes writes config.yaml,
+  ## .env, SOUL.md, state.db (SQLite), sessions/, memories/, skills/, cron/, logs/
+  ## under HERMES_HOME, which the chart points at `mountPath` (the official layout
+  ## uses `/opt/data`). A ReadWriteOnce volume attaches to one pod, so with
+  ## persistence enabled the gateway runs a single replica with a `Recreate`
+  ## rollout (see `strategy`).
   persistence:
     enabled: true
     mountPath: /opt/data
     existingClaim: ""
     storageClass: ""
     accessMode: ReadWriteOnce
-    size: 1Gi
+    size: 2Gi
     annotations: {}
     selector: {}
     subPath: ""
+
   extraVolumes: []
   extraVolumeMounts: []
   lifecycle: {}
   terminationGracePeriodSeconds: 30
   strategy: {}
 
-## ---------- Hermes Dashboard ----------
-dashboard:
-  enabled: true
-  replicaCount: 1
-  annotations: {}
-  podAnnotations: {}
-  podLabels: {}
-  image:
-    repository: ghcr.io/geee-be/hermes-dashboard
-    tag: "0.1.0"
-    pullPolicy: IfNotPresent
-  command: []
-  args: []
-  env: []
-  envFrom: []
-  ports:
-    - name: http
-      containerPort: 3000
-      protocol: TCP
-  service:
-    type: ClusterIP
-    port: 3000
-    targetPort: http
-    annotations: {}
-    extraPorts: []
-  serviceAccount:
-    create: null
-    name: ""
-    annotations: null
-  resources:
-    requests:
-      cpu: 50m
-      memory: 64Mi
-    limits:
-      cpu: 250m
-      memory: 256Mi
-  autoscaling:
-    enabled: false
-    minReplicas: 1
-    maxReplicas: 5
-    targetCPUUtilizationPercentage: 80
-    targetMemoryUtilizationPercentage: null
-  livenessProbe:
-    enabled: true
-    path: /healthz
-    port: http
-    initialDelaySeconds: 10
-    periodSeconds: 10
-    timeoutSeconds: 2
-    failureThreshold: 3
-  readinessProbe:
-    enabled: true
-    path: /readyz
-    port: http
-    initialDelaySeconds: 5
-    periodSeconds: 5
-    timeoutSeconds: 2
-    failureThreshold: 3
-  startupProbe: {}
-  ## Pod-level securityContext (runAsUser/runAsGroup/runAsNonRoot/fsGroup/seccompProfile/...)
-  podSecurityContext:
-    runAsNonRoot: true
-    runAsUser: 1000
-    runAsGroup: 1000
-    fsGroup: 1000
-  ## Container-level securityContext (capabilities, readOnlyRootFilesystem, allowPrivilegeEscalation, ...)
-  containerSecurityContext:
-    allowPrivilegeEscalation: false
-    readOnlyRootFilesystem: true
-    capabilities:
-      drop:
-        - ALL
-  priorityClassName: ""
-  topologySpreadConstraints: []
-  ## Optional durable storage for the dashboard. The dashboard is a stateless web UI,
-  ## so persistence is disabled by default; enable it only if a specific dashboard
-  ## build writes state to disk. When enabled, HERMES_HOME points at `mountPath`
-  ## (the official Hermes layout uses `/opt/data`).
-  persistence:
-    enabled: false
-    mountPath: /opt/data
-    existingClaim: ""
-    storageClass: ""
-    accessMode: ReadWriteOnce
-    size: 1Gi
-    annotations: {}
-    selector: {}
-    subPath: ""
-  extraVolumes: []
-  extraVolumeMounts: []
-  lifecycle: {}
-  terminationGracePeriodSeconds: 30
-  strategy: {}
-
-## Shared config / secret material for both workloads
+## Shared config / secret material, wired into the gateway container as envFrom.
+## API keys and API_SERVER_KEY are read by Hermes directly from environment
+## variables, so `secret.stringData` is the recommended way to supply them.
 config:
   enabled: true
   data: {}
@@ -227,7 +213,7 @@ secret:
   annotations: {}
   type: Opaque
 
-## Ingress for exposing the services
+## Ingress for exposing the gateway API (and dashboard) services
 ingress:
   enabled: false
   className: ""
@@ -238,23 +224,17 @@ ingress:
         - path: /
           pathType: Prefix
           service: gateway
-          port: http
+          port: api
   tls: []
 
-## PodDisruptionBudget for the workloads
+## PodDisruptionBudget for the gateway workload
 podDisruptionBudget:
   enabled: false
   minAvailable: 1
   maxUnavailable: null
 
-## NetworkPolicy
+## NetworkPolicy (default-deny; same-namespace + DNS egress allowed)
 networkPolicy:
   enabled: false
-  ## Extra ingress rules appended after the default same-namespace rule (traffic from any
-  ## pod in the release namespace is always allowed so the dashboard can reach the gateway).
-  ## Cross-namespace ingress is denied unless allowed here, e.g.:
-  ## --set 'networkPolicy.extraIngressRules[0].from[0].namespaceSelector.matchLabels.team=plat'
   extraIngressRules: []
-  ## Extra egress rules (beyond the default DNS + same-namespace allowance).
-  ## e.g. to reach an external API: --set 'networkPolicy.extraEgressRules[0].to[0].ipBlock.cidr=0.0.0.0/0'
   extraEgressRules: []

@@ -1,15 +1,18 @@
 apiVersion: v2
 name: hermes
-description: A Helm chart for running the Hermes gateway and dashboard on Kubernetes
+description: A Helm chart for running the Hermes agent gateway and dashboard on Kubernetes
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.2.0
+appVersion: "latest"
 home: https://github.com/gregbacchus/hermes-k8s
 sources:
   - https://github.com/gregbacchus/hermes-k8s
+  - https://github.com/NousResearch/hermes-agent
 keywords:
   - hermes
+  - agent
   - gateway
   - dashboard
+  - llm
 maintainers:
   - name: Geee Be

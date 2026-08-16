@@ -1,17 +1,11 @@
-{{- if .Values.podDisruptionBudget.enabled }}
-{{- $root := . }}
-{{- $components := list (dict "name" "gateway" "values" .Values.gateway) (dict "name" "dashboard" "values" .Values.dashboard) }}
-{{- range $components }}
-{{- if .values.enabled }}
-{{- $component := .name }}
-{{- with $root }}
+{{- if and .Values.podDisruptionBudget.enabled .Values.gateway.enabled }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: {{ include "hermes.fullname" . }}-{{ $component }}
+  name: {{ include "hermes.fullname" . }}-gateway
   labels:
-    {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" $component)) | nindent 4 }}
+    {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" "gateway")) | nindent 4 }}
 spec:
   {{- if .Values.podDisruptionBudget.minAvailable }}
   minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
@@ -21,8 +15,5 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      {{- include "hermes.componentSelectorLabels" (merge (deepCopy .) (dict "component" $component)) | nindent 6 }}
-{{- end }}
-{{- end }}
-{{- end }}
+      {{- include "hermes.componentSelectorLabels" (merge (deepCopy .) (dict "component" "gateway")) | nindent 6 }}
 {{- end }}
