@@ -20,10 +20,12 @@ spec:
   policyTypes:
     - Ingress
     - Egress
-  {{- if .Values.networkPolicy.extraIngressRules }}
   ingress:
-    {{- toYaml .Values.networkPolicy.extraIngressRules | nindent 4 }}
-  {{- end }}
+    - from:
+        - podSelector: {}
+    {{- with .Values.networkPolicy.extraIngressRules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   egress:
     - to:
         - namespaceSelector: {}

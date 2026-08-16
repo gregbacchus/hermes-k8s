@@ -34,6 +34,50 @@ jobs:
                   sys.exit('ERROR: Service without ports block rendered')
           print(f'OK: {len(services)} Service(s) all define ports')
           "
+      - name: Assert test hooks target a health path and run unprivileged
+        run: |
+          python3 -c "
+          import re, sys
+          docs = open('/tmp/render.yaml').read().split('---')
+          hooks = [d for d in docs if re.search(r'\"helm.sh/hook\": test', d)]
+          assert hooks, 'no test hook pods rendered'
+          for d in hooks:
+              assert re.search(r'runAsUser:\s*1000', d), 'hook must run unprivileged'
+              assert re.search(r'workdir:\s*/tmp|workingDir:\s*/tmp', d, re.I), 'hook needs writable cwd'
+              args = re.search(r'args:.*?(?=restartPolicy|\Z)', d, re.S)
+              assert args and '-O' in args.group(0) and '/dev/null' in args.group(0), 'hook wget must discard body via -O /dev/null'
+              assert re.search(r'/healthz|\$\{livenessProbe', d) or 'livenessProbe.path' in d, 'hook must target a health path'
+          print(f'OK: {len(hooks)} test hook(s) target health path unprivileged')
+          "
+      - name: Assert config/secret are wired into Deployments
+        run: |
+          helm template hermes ./chart \
+            --set config.enabled=true \
+            --set secret.enabled=true > /tmp/render-envfrom.yaml
+          python3 -c "
+          import re, sys
+          docs = open('/tmp/render-envfrom.yaml').read().split('---')
+          deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
+          assert deps, 'no Deployments rendered'
+          for d in deps:
+              assert 'configMapRef' in d and 'name: hermes' in d, 'Deployment missing configMapRef envFrom'
+              assert 'secretRef' in d and 'name: hermes' in d, 'Deployment missing secretRef envFrom'
+          print(f'OK: {len(deps)} Deployment(s) wired to shared config/secret')
+          "
+      - name: Assert NetworkPolicy allows same-namespace ingress
+        run: |
+          helm template hermes ./chart \
+            --set networkPolicy.enabled=true > /tmp/render-netpol.yaml
+          python3 -c "
+          import re, sys
+          docs = open('/tmp/render-netpol.yaml').read().split('---')
+          nps = [d for d in docs if re.search(r'^kind:\s*NetworkPolicy\s*$', d, re.M)]
+          assert nps, 'no NetworkPolicies rendered'
+          for d in nps:
+              ingress = re.search(r'^  ingress:(.*?)(?=^  egress:)', d, re.S | re.M)
+              assert ingress and 'podSelector' in ingress.group(1), 'NetworkPolicy missing same-namespace ingress rule'
+          print(f'OK: {len(nps)} NetworkPolicy(ies) allow same-namespace ingress')
+          "
       - name: Validate strict schema (kubeconform)
         run: |
           curl -sSfL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \

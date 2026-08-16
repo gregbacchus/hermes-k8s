@@ -23,8 +23,9 @@ spec:
     - name: wget
       image: busybox:1.36
       imagePullPolicy: IfNotPresent
+      workingDir: /tmp
       command: ['wget']
-      args: ['--timeout=5', '--tries=1', '{{ include "hermes.fullname" . }}-{{ $component }}:{{ $compValues.service.port }}']
+      args: ['--timeout=5', '--tries=1', '-O', '/dev/null', 'http://{{ include "hermes.fullname" . }}-{{ $component }}:{{ $compValues.service.port }}{{ $compValues.livenessProbe.path }}']
   restartPolicy: Never
 {{- end }}
 {{- end }}

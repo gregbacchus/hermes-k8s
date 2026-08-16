@@ -95,10 +95,19 @@ spec:
           env:
             {{- toYaml $compValues.env | nindent 12 }}
           {{- end }}
-          {{- if $compValues.envFrom }}
+          {{- $envFrom := list }}
+          {{- if .Values.config.enabled }}
+          {{- $envFrom = append $envFrom (dict "configMapRef" (dict "name" (include "hermes.fullname" .))) }}
+          {{- end }}
+          {{- if .Values.secret.enabled }}
+          {{- $envFrom = append $envFrom (dict "secretRef" (dict "name" (include "hermes.fullname" .))) }}
+          {{- end }}
+          {{- $envFrom = concat $envFrom $compValues.envFrom }}
+          {{- if $envFrom }}
           envFrom:
-            {{- toYaml $compValues.envFrom | nindent 12 }}
-          {{- end }}          {{- with $compValues.lifecycle }}
+            {{- toYaml $envFrom | nindent 12 }}
+          {{- end }}
+          {{- with $compValues.lifecycle }}
           lifecycle:
             {{- toYaml . | nindent 12 }}
           {{- end }}

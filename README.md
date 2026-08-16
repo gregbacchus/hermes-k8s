@@ -45,6 +45,24 @@ The chart deploys two workloads:
 Both workloads share `serviceAccount`, `podAnnotations`, `podLabels`, `nodeSelector`,
 `tolerations`, `affinity`, `imagePullSecrets`, and the shared `config`/`secret` material.
 
+### ConfigMap and Secret
+
+The chart creates a shared `ConfigMap` (when `config.enabled=true`, the default) and an
+optional shared `Secret` (when `secret.enabled=true`). When created, they are wired into
+**both** workloads as `envFrom` sources (`configMapRef`/`secretRef`), so every key in
+`config.data` and `secret.stringData` becomes an environment variable in the gateway and
+dashboard containers:
+
+```bash
+helm install hermes ./chart \
+  --set 'config.data[APP_ENV]=production' \
+  --set secret.enabled=true \
+  --set 'secret.stringData[API_TOKEN]=change-me'
+```
+
+`gateway.envFrom` / `dashboard.envFrom` entries are appended after the shared refs, so
+per-component sources can override the shared keys.
+
 ### Service accounts
 
 - Each enabled component gets its own `ServiceAccount` (`{name}-gateway`, `{name}-dashboard`)
@@ -86,17 +104,32 @@ dropped, and privilege escalation disabled.
 | `dashboard.image.repository` | Dashboard image repository | `ghcr.io/geee-be/hermes-dashboard` |
 | `dashboard.image.tag` | Dashboard image tag | `0.1.0` |
 | `dashboard.service.port` | Dashboard service port | `3000` |
-| `config.data` | Shared config map data | `{}` |
-| `secret.enabled` | Create a shared secret | `false` |
+| `config.enabled` | Create the shared ConfigMap and wire it into both workloads | `true` |
+| `config.data` | Shared config map data (exposed as env vars via `envFrom`) | `{}` |
+| `secret.enabled` | Create a shared Secret and wire it into both workloads | `false` |
 | `secret.stringData` | Secret values (base64-encoded in `secret.data` when pre-encoded) | `{}` |
 | `ingress.enabled` | Create an Ingress | `false` |
 | `ingress.hosts` | Ingress host/path rules | see `values.yaml` |
 | `podDisruptionBudget.enabled` | Create PodDisruptionBudgets | `false` |
-| `networkPolicy.enabled` | Create NetworkPolicies (default-deny ingress+egress) | `false` |
+| `networkPolicy.enabled` | Create NetworkPolicies (default-deny, same-namespace traffic allowed) | `false` |
+| `networkPolicy.extraIngressRules` | Extra ingress rules (beyond the default same-namespace rule) | `[]` |
 | `networkPolicy.extraEgressRules` | Extra egress rules for outbound traffic | `[]` |
 | `serviceAccount.name` | Global ServiceAccount name override | `""` |
 
 Full parameter reference is in `chart/values.yaml`.
+
+> **Autoscaling**: an HPA is only created when `autoscaling.enabled=true` **and** at least
+> one of `targetCPUUtilizationPercentage` / `targetMemoryUtilizationPercentage` is set.
+> Enabling autoscaling with both targets unset silently creates no HPA.
+>
+> **PodDisruptionBudget**: the default `podDisruptionBudget.minAvailable: 1` with
+> `replicaCount: 1` blocks voluntary evictions (node drains, cluster autoscaling). Only
+> enable PDBs when you run multiple replicas, or set `minAvailable: 0`.
+>
+> **Default images**: `ghcr.io/geee-be/hermes-gateway:0.1.0` and
+> `ghcr.io/geee-be/hermes-dashboard:0.1.0` are assumed to be published and pullable by the
+> cluster; if the images are private or unpublished, set `gateway.image.repository` /
+> `dashboard.image.repository` to your published registry.
 
 ### Deploying with a custom gateway tag and 3 replicas
 
@@ -143,16 +176,19 @@ helm install hermes ./chart \
 
 ### Sealing the gateway behind the dashboard
 
-The `networkPolicy.extraIngressRules` parameter allows you to restrict ingress to each
-workload. Combined with the shared labels, you can allow the dashboard namespace to reach
-the gateway only.
-
 NetworkPolicies are **default-deny** for both ingress and egress when
-`networkPolicy.enabled=true`. The default egress rule allows:
+`networkPolicy.enabled=true`. The default rules keep the two workloads able to talk to each
+other while denying everything else:
 
-- DNS lookups (port 53 TCP/UDP) to any namespace,
-- all traffic within the release namespace (so the dashboard can reach the gateway and
-  vice-versa).
+- **Ingress** — each workload allows traffic from any pod in the same namespace
+  (`podSelector: {}`), so the dashboard can reach the gateway and vice-versa. Ingress from
+  other namespaces is denied unless added via `networkPolicy.extraIngressRules`.
+- **Egress** — DNS lookups (port 53 TCP/UDP) to any namespace, plus all traffic within the
+  release namespace (so the dashboard can reach the gateway and vice-versa).
+
+To restrict ingress to the dashboard namespace only, add an explicit
+`networkPolicy.extraIngressRules` rule; the default same-namespace rule always applies, so
+the app keeps working.
 
 Any other outbound traffic (for example the gateway calling an external API) must be added
 via `networkPolicy.extraEgressRules`, e.g.:
@@ -164,6 +200,10 @@ helm install hermes ./chart \
 ```
 
 ## Verifying the release
+
+`helm test` runs a smoke pod per workload that wgets the workload's health endpoint
+(`livenessProbe.path`, default `/healthz`) as an unprivileged user and succeeds only on a
+2xx response:
 
 ```bash
 helm test hermes

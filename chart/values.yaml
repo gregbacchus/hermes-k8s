@@ -218,6 +218,10 @@ podDisruptionBudget:
 ## NetworkPolicy
 networkPolicy:
   enabled: false
+  ## Extra ingress rules appended after the default same-namespace rule (traffic from any
+  ## pod in the release namespace is always allowed so the dashboard can reach the gateway).
+  ## Cross-namespace ingress is denied unless allowed here, e.g.:
+  ## --set 'networkPolicy.extraIngressRules[0].from[0].namespaceSelector.matchLabels.team=plat'
   extraIngressRules: []
   ## Extra egress rules (beyond the default DNS + same-namespace allowance).
   ## e.g. to reach an external API: --set 'networkPolicy.extraEgressRules[0].to[0].ipBlock.cidr=0.0.0.0/0'
