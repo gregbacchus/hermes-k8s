@@ -46,3 +46,17 @@ liveness/readiness probes and helm test hook are not rendered. The Hermes image 
 starts the API server if any API_SERVER_KEY reaches the container (e.g. via
 secret.stringData or gateway.envFrom) — it ignores API_SERVER_ENABLED=false.
 {{- end }}
+
+{{- if not .Values.gateway.persistence.enabled }}
+WARNING: gateway.persistence.enabled is false. Hermes's self-managed state
+(config.yaml, .env, SOUL.md, state.db, sessions/, memories/, skills/, cron/, logs/)
+is stored in an ephemeral emptyDir and will be LOST on pod restart, upgrade, or
+uninstall. To keep state across restarts, re-enable persistence (set
+gateway.persistence.enabled=true) or reuse an existing PVC via
+gateway.persistence.existingClaim.
+{{- else if not .Values.gateway.persistence.existingClaim }}
+Note: the chart-created PVC ({{ include "hermes.fullname" . }}-gateway) is annotated
+helm.sh/resource-policy: keep, so `helm uninstall` leaves it (and the agent's managed
+state) intact rather than deleting it. To permanently purge the agent's state, run:
+  kubectl delete pvc {{ include "hermes.fullname" . }}-gateway -n {{ .Release.Namespace }}
+{{- end }}

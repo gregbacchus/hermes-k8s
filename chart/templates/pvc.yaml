@@ -6,10 +6,8 @@ metadata:
   name: {{ include "hermes.fullname" . }}-gateway
   labels:
     {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" "gateway")) | nindent 4 }}
-  {{- with .Values.gateway.persistence.annotations }}
   annotations:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+    {{- toYaml (merge (dict "helm.sh/resource-policy" "keep") (default (dict) .Values.gateway.persistence.annotations)) | nindent 4 }}
 spec:
   accessModes:
     - {{ .Values.gateway.persistence.accessMode }}

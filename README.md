@@ -42,6 +42,42 @@ Two consequences drive the chart design:
    detection, so the chart models the dashboard as a flag on the single gateway pod
    (`gateway.dashboard.enabled` → `HERMES_DASHBOARD=1`), not a separate Deployment.
 
+## Deployment vs StatefulSet
+
+Hermes is **stateful but single-writer**, so the chart models the gateway as a
+`Deployment`, not a `StatefulSet`. The board has asked why; here is the evidence-based
+rationale.
+
+**Statefulness model.** All Hermes state (`config.yaml`, `.env`, `SOUL.md`, `state.db`,
+`sessions/`, `memories/`, `skills/`, `cron/`, `logs/`) lives in one directory
+(`HERMES_HOME` = `/opt/data`) that **exactly one process may write at a time** ("never run
+two Hermes gateway containers against the same data directory simultaneously"). The chart
+enforces this single-writer contract with:
+
+- a single replica (`gateway.replicaCount: 1`),
+- a `ReadWriteOnce` PVC (attaches to one pod at a time),
+- a `Recreate` rollout (old pod stopped before the new one starts), and
+- render-time `fail` guards if `replicaCount > 1` or HPA `maxReplicas > 1` while
+  persistence is enabled.
+
+**Why not a StatefulSet.** A `StatefulSet` buys three things, none of which Hermes needs:
+
+1. **Stable network identity** (`{name}-0`, `{name}-1`). Hermes is reached through its
+   `Service`, never by pod hostname, and stores no hostname-keyed state — `gateway.lock`,
+   `pid`, and `state.db` live in the data directory, and the container runtime starts the
+   image with a fresh container ID each time. Stable identity would be unused.
+2. **Ordered, graceful scaling.** A single-replica single-writer app never scales out;
+   ordered start/stop is irrelevant.
+3. **PVC-per-replica** (`volumeClaimTemplates`). With one replica there is exactly one
+   PVC; per-replica provisioning adds nothing.
+
+A `StatefulSet` would not remove the downtime of a `Recreate` rollout either.
+
+**When a StatefulSet becomes required.** Switch to a `StatefulSet` only if Hermes gains a
+feature that needs one of the three properties above — e.g. multi-writer replicas,
+hostname-keyed state (peer discovery/replication by pod hostname), or a PVC-per-replica
+storage layout. None of those exist today.
+
 ## Installing
 
 ```bash
@@ -161,6 +197,22 @@ replica or enable autoscaling above `maxReplicas: 1`.
 
 > **Warning**: never run two Hermes gateways against the same data directory — session
 > files and memory stores are not designed for concurrent access.
+
+#### Uninstall and state retention
+
+The chart-created PVC is annotated `helm.sh/resource-policy: keep`, so `helm uninstall`
+leaves the PVC (and the agent's managed state) in place rather than deleting it — this is
+the board's "managed state of the agent" requirement. To permanently purge the state,
+delete the PVC explicitly:
+
+```bash
+kubectl delete pvc <release-name>-gateway -n <namespace>
+```
+
+> **Warning**: do **not** disable persistence on an existing release
+> (`helm upgrade … --set gateway.persistence.enabled=false`) — the chart swaps the PVC for
+> an ephemeral `emptyDir`, silently orphaning the PVC and booting the agent with a fresh,
+> empty state. Reuse `gateway.persistence.existingClaim` to reattach existing state instead.
 
 ### Security contexts
 

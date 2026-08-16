@@ -214,11 +214,18 @@ gateway:
   ## persistence enabled the gateway runs a single replica with a `Recreate`
   ## rollout (see `strategy`).
   ##
+  ## The chart-created PVC is annotated `helm.sh/resource-policy: keep`, so
+  ## `helm uninstall` leaves the PVC (and the agent's managed state) in place
+  ## rather than deleting it. To permanently purge state, delete the PVC manually
+  ## (`kubectl delete pvc <release>-gateway`).
+  ##
   ## When persistence is disabled the chart mounts an ephemeral emptyDir at
   ## `mountPath` so Hermes still has a writable state directory under
   ## readOnlyRootFilesystem (the image's own VOLUME is Docker-only; kubelet does
   ## not mount it). State is then lost on pod restart — use only for stateless
-  ## evaluation.
+  ## evaluation, and note that disabling persistence on an existing release (an
+  ## `helm upgrade` that flips `enabled: false`) silently orphans the PVC and boots
+  ## the agent with a fresh, empty state. Reuse `existingClaim` to reattach.
   persistence:
     enabled: true
     mountPath: /opt/data

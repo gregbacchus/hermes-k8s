@@ -144,6 +144,7 @@ jobs:
           docs = open('/tmp/render-pvc.yaml').read().split('---')
           pvcs = [d for d in docs if re.search(r'^kind:\s*PersistentVolumeClaim\s*$', d, re.M)]
           assert len(pvcs) == 1, 'expected exactly one default PVC (gateway persistence)'
+          assert re.search(r'helm\.sh/resource-policy:\s*keep', pvcs[0]), 'PVC must be annotated helm.sh/resource-policy: keep (uninstall must not destroy state)'
           deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
           assert len(deps) == 1, 'expected exactly one Deployment'
           gw = deps[0]
@@ -158,6 +159,36 @@ jobs:
           assert not [d for d in docs2 if re.search(r'^kind:\s*PersistentVolumeClaim\s*$', d, re.M)], 'existingClaim must suppress chart PVC'
           assert 'claimName: hermes-data' in open('/tmp/render-existingclaim.yaml').read(), 'existingClaim name must be used'
           print('OK: persistence PVC + HERMES_HOME + fsGroup 10000 + scratch mounts wired')
+          "
+      - name: Assert persistence.enabled=false emits emptyDir and a loud NOTES warning
+        run: |
+          helm template hermes ./chart \
+            --set gateway.persistence.enabled=false > /tmp/render-nopersist.yaml
+          helm install hermes ./chart --dry-run \
+            --set gateway.persistence.enabled=false > /tmp/notes-nopersist.yaml
+          python3 -c "
+          import re, sys
+          docs = open('/tmp/render-nopersist.yaml').read().split('---')
+          assert not [d for d in docs if re.search(r'^kind:\s*PersistentVolumeClaim\s*$', d, re.M)], 'persistence.enabled=false must render no PVC'
+          deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
+          assert deps, 'no Deployment rendered'
+          gw = deps[0]
+          assert re.search(r'- name: gateway-data\s*\n\s*emptyDir:\s*\{\}', gw), 'persistence.enabled=false must mount an emptyDir at the state path'
+          assert 'persistentVolumeClaim' not in gw, 'persistence.enabled=false must not reference a PVC'
+          notes = open('/tmp/notes-nopersist.yaml').read()
+          assert 'gateway.persistence.enabled is false' in notes, 'NOTES must warn loudly when persistence is disabled'
+          print('OK: persistence.enabled=false emits emptyDir and a loud NOTES warning')
+          "
+      - name: Assert PVC carries the keep resource-policy annotation
+        run: |
+          helm template hermes ./chart > /tmp/render-pvc-keep.yaml
+          python3 -c "
+          import re, sys
+          docs = open('/tmp/render-pvc-keep.yaml').read().split('---')
+          pvcs = [d for d in docs if re.search(r'^kind:\s*PersistentVolumeClaim\s*$', d, re.M)]
+          assert len(pvcs) == 1, 'expected exactly one default PVC'
+          assert re.search(r'helm\.sh/resource-policy:\s*keep', pvcs[0]), 'PVC must carry helm.sh/resource-policy: keep'
+          print('OK: PVC annotated helm.sh/resource-policy: keep')
           "
       - name: Assert container securityContext capability contract
         run: |
