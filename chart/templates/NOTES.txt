@@ -40,4 +40,9 @@ Set gateway.apiServer.key, gateway.apiServer.keySecretRef, or
 secret.stringData.API_SERVER_KEY to start it. Shorter keys are silently rejected by
 the Hermes image and the pod crash-loops.
 {{- end }}
+{{- else }}
+Note: the API server is disabled (gateway.apiServer.enabled=false), so the gateway's
+liveness/readiness probes and helm test hook are not rendered. The Hermes image still
+starts the API server if any API_SERVER_KEY reaches the container (e.g. via
+secret.stringData or gateway.envFrom) — it ignores API_SERVER_ENABLED=false.
 {{- end }}

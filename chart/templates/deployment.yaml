@@ -1,5 +1,5 @@
 {{- if .Values.gateway.enabled }}
-{{- if and .Values.gateway.apiServer.enabled .Values.gateway.apiServer.key (lt (len .Values.gateway.apiServer.key) 16) }}
+{{- if and .Values.gateway.apiServer.enabled (not .Values.gateway.apiServer.keySecretRef.name) .Values.gateway.apiServer.key (lt (len .Values.gateway.apiServer.key) 16) }}
 {{- fail "gateway.apiServer.key must be at least 16 characters: the Hermes image refuses keys shorter than 16, so the API server never binds 8642 and the pod crash-loops. Use a >=16-char key, or supply an external Secret via gateway.apiServer.keySecretRef (length cannot be validated at render time)." }}
 {{- end }}
 ---
@@ -139,6 +139,9 @@ spec:
             - name: API_SERVER_CORS_ORIGINS
               value: {{ .Values.gateway.apiServer.corsOrigins | quote }}
             {{- end }}
+            {{- else }}
+            - name: API_SERVER_ENABLED
+              value: "false"
             {{- end }}
             {{- if .Values.gateway.dashboard.enabled }}
             - name: HERMES_DASHBOARD
@@ -183,6 +186,7 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- if .Values.gateway.apiServer.enabled }}
           {{- if .Values.gateway.startupProbe }}
           startupProbe:
             {{- toYaml .Values.gateway.startupProbe | nindent 12 }}
@@ -205,6 +209,7 @@ spec:
             periodSeconds: {{ .Values.gateway.readinessProbe.periodSeconds }}
             timeoutSeconds: {{ .Values.gateway.readinessProbe.timeoutSeconds }}
             failureThreshold: {{ .Values.gateway.readinessProbe.failureThreshold }}
+          {{- end }}
           {{- end }}
           volumeMounts:
             {{- if .Values.gateway.persistence.enabled }}

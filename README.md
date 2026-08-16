@@ -93,7 +93,8 @@ default and requires a bearer key:
 - `gateway.apiServer.host` / `gateway.apiServer.port` — bind address/port (default
   `0.0.0.0` / `8642`).
 - `gateway.apiServer.key` — plaintext `API_SERVER_KEY` (min 16 chars, image-enforced).
-  The chart fails to render if a shorter key is supplied.
+  The chart fails to render if a shorter key is supplied (unless `keySecretRef.name` is
+  set).
 - `gateway.apiServer.keySecretRef` — reference an existing Secret instead (`{name, key}`).
   The Secret's value cannot be length-validated at render time, so it must itself be
   16+ chars.
@@ -104,6 +105,20 @@ default and requires a bearer key:
 > connection-refused, and the pod fails its liveness probe (crash-loop) even though the
 > gateway process itself keeps running. With a valid key, `/health` returns HTTP 200 on a
 > fresh, unconfigured install and the pod becomes Ready immediately.
+
+### Disabling the API server
+
+`gateway.apiServer.enabled=false` makes the chart stop managing the API server: it sets
+`API_SERVER_ENABLED=false`, omits the host/port/key/cors environment, and removes the
+liveness/readiness probes and the `helm test` hook (they target the API server's `/health`,
+which is no longer guaranteed to listen).
+
+> **Important:** the Hermes image starts the API server whenever a valid `API_SERVER_KEY`
+> is present in the environment and **ignores `API_SERVER_ENABLED`** (verified
+> empirically). So `apiServer.enabled=false` alone does not disable the API server if a
+> key still reaches the container — for example via `secret.stringData.API_SERVER_KEY`,
+> `gateway.env`, or `gateway.envFrom`. To truly run without the API server, ensure no
+> `API_SERVER_KEY` is supplied anywhere.
 
 ### Dashboard
 
@@ -234,7 +249,8 @@ ingress:
 ```
 
 Each `paths[].port` may be a Service **port name** (`api`, `dashboard`) or a **port
-number** (`8642`, `9119`); the chart renders `port.name` or `port.number` accordingly.
+number** (`8642`, `9119`, quoted or unquoted); the chart renders `port.name` or
+`port.number` accordingly (an all-digit string is treated as a number).
 
 ### NetworkPolicy
 

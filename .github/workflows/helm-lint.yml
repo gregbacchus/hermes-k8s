@@ -26,6 +26,57 @@ jobs:
             exit 1
           fi
           echo "OK: short API key rejected at render time"
+      - name: Assert keySecretRef skips the short-key render guard
+        run: |
+          helm template hermes ./chart \
+            --set gateway.apiServer.key=shortkey \
+            --set gateway.apiServer.keySecretRef.name=my-secret > /tmp/render-keyref.yaml
+          python3 -c "
+          import re, sys
+          docs = open('/tmp/render-keyref.yaml').read().split('---')
+          deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
+          assert deps, 'no Deployment rendered'
+          assert 'secretKeyRef' in deps[0] and 'name: my-secret' in deps[0], 'must prefer keySecretRef over plaintext key'
+          print('OK: short key + keySecretRef.name renders (guard skipped)')
+          "
+      - name: Assert apiServer.enabled=false gates probes/test hook and sets API_SERVER_ENABLED=false
+        run: |
+          helm template hermes ./chart \
+            --set gateway.apiServer.enabled=false > /tmp/render-apiserver-off.yaml
+          python3 -c "
+          import re, sys
+          docs = open('/tmp/render-apiserver-off.yaml').read().split('---')
+          deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
+          assert deps, 'no Deployment rendered'
+          gw = deps[0]
+          assert 'livenessProbe' not in gw and 'readinessProbe' not in gw and 'startupProbe' not in gw, 'probes must be gated on apiServer.enabled'
+          assert re.search(r'name: API_SERVER_ENABLED\s*\n\s*value: \"false\"', gw), 'must set API_SERVER_ENABLED=false when disabled'
+          assert not [d for d in docs if re.search(r'\"helm.sh/hook\": test', d)], 'test hook must be gated on apiServer.enabled'
+          print('OK: apiServer.enabled=false gates probes + test hook and sets API_SERVER_ENABLED=false')
+          "
+      - name: Assert ingress quoted numeric port renders number
+        run: |
+          cat > /tmp/ingress-port-string.yaml <<'YAML'
+          ingress:
+            enabled: true
+            hosts:
+              - host: hermes.example.com
+                paths:
+                  - path: /
+                    pathType: Prefix
+                    service: gateway
+                    port: "8642"
+          YAML
+          helm template hermes ./chart -f /tmp/ingress-port-string.yaml > /tmp/render-ingress-strport.yaml
+          python3 -c "
+          import re, sys
+          docs = open('/tmp/render-ingress-strport.yaml').read().split('---')
+          ing = [d for d in docs if re.search(r'^kind:\s*Ingress\s*$', d, re.M)]
+          assert ing, 'no Ingress rendered'
+          assert re.search(r'number:\s*8642', ing[0]), 'quoted numeric port must render number: 8642'
+          assert 'name: \"8642\"' not in ing[0], 'quoted numeric port must not render as a name'
+          print('OK: quoted numeric ingress port renders number: 8642')
+          "
       - name: Validate schema
         run: |
           kubectl apply --dry-run=client --validate=true -f /tmp/render.yaml

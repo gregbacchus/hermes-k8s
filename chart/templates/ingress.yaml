@@ -31,10 +31,11 @@ spec:
               service:
                 name: {{ include "hermes.fullname" $ }}-{{ .service }}
                 port:
-                  {{- if kindIs "string" (default "api" .port) }}
-                  name: {{ .port | default "api" }}
+                  {{- $p := default "api" .port }}
+                  {{- if regexMatch "^[0-9]+$" (toString $p) }}
+                  number: {{ $p }}
                   {{- else }}
-                  number: {{ .port }}
+                  name: {{ $p }}
                   {{- end }}
           {{- end }}
     {{- end }}

@@ -58,9 +58,21 @@ gateway:
   ## OpenAI-compatible API server (also serves the health endpoint). Requires a
   ## `key` of at least 16 chars to start — the Hermes image silently refuses keys
   ## shorter than 16, leaving no listener on 8642 (pod crash-loops). The chart
-  ## fails at render time if a shorter `key` is set. Prefer `keySecretRef` (or the
-  ## shared `secret.stringData.API_SERVER_KEY`) over a plaintext `key`; an external
-  ## Secret's value cannot be length-validated at render time.
+  ## fails at render time if a shorter `key` is set (unless `keySecretRef.name` is
+  ## set, in which case the external Secret's value cannot be length-validated at
+  ## render time). Prefer `keySecretRef` (or the shared
+  ## `secret.stringData.API_SERVER_KEY`) over a plaintext `key`.
+  ##
+  ## `enabled: false` tells the chart to stop managing the API server: it sets
+  ## `API_SERVER_ENABLED=false`, omits the host/port/key/cors env, and drops the
+  ## liveness/readiness probes and the `helm test` hook (they target `/health` on
+  ## the API server port, which is no longer guaranteed to be listening). NOTE:
+  ## the Hermes image starts the API server whenever a valid (16+ char)
+  ## `API_SERVER_KEY` is present in the environment and *ignores*
+  ## `API_SERVER_ENABLED` (verified empirically), so to truly disable it you must
+  ## also ensure no `API_SERVER_KEY` reaches the container (e.g. leave
+  ## `secret.stringData.API_SERVER_KEY`, `gateway.env`, and `gateway.envFrom`
+  ## clear of it).
   apiServer:
     enabled: true
     host: "0.0.0.0"
@@ -109,6 +121,8 @@ gateway:
   ## becomes Ready immediately. With no key (or a <16-char key) the API server
   ## never binds, so `/health` is connection-refused and the pod fails its probes
   ## (crash-loop) while the gateway process itself keeps running.
+  ## These probes (and the `helm test` hook) are rendered only when
+  ## `apiServer.enabled` is true, since they target the API server's `/health`.
   livenessProbe:
     enabled: true
     path: /health
