@@ -1,0 +1,11 @@
+# Patterns to ignore when building packages.
+# See https://helm.sh/docs/chart_best_practices/
+# vcs
+.git/
+.gitignore
+.gitattributes
+
+# Others
+.DS_Store
+*.tmpl
+*.tgz

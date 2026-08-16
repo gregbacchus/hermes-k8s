@@ -1,0 +1,26 @@
+{{- $root := . }}
+{{- $components := list (dict "name" "gateway" "values" .Values.gateway) (dict "name" "dashboard" "values" .Values.dashboard) }}
+{{- range $components }}
+{{- if .values.enabled }}
+{{- $component := .name }}
+{{- $compValues := .values }}
+{{- with $root }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "hermes.fullname" . }}-{{ $component }}-test-connection"
+  labels:
+    {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" $component)) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+spec:
+  containers:
+    - name: wget
+      image: busybox
+      command: ['wget']
+      args: ['--timeout=5', '--tries=1', '{{ include "hermes.fullname" . }}-{{ $component }}:{{ $compValues.service.port }}']
+  restartPolicy: Never
+{{- end }}
+{{- end }}
+{{- end }}

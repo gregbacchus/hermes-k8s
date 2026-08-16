@@ -1,0 +1,137 @@
+{{- $root := . }}
+{{- $components := list (dict "name" "gateway" "values" .Values.gateway) (dict "name" "dashboard" "values" .Values.dashboard) }}
+{{- range $components }}
+{{- if .values.enabled }}
+{{- $component := .name }}
+{{- $compValues := .values }}
+{{- with $root }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hermes.fullname" . }}-{{ $component }}
+  labels:
+    {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" $component)) | nindent 4 }}
+  {{- with $compValues.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ $compValues.replicaCount }}
+  {{- with $compValues.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "hermes.componentSelectorLabels" (merge (deepCopy .) (dict "component" $component)) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" $component)) | nindent 8 }}
+        {{- with $compValues.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with (include "hermes.podAnnotations" (merge (deepCopy .) (dict "component" $component))) }}
+      annotations:
+        {{- . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with $compValues.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      serviceAccountName: {{ include "hermes.serviceAccountName" (merge (deepCopy .) (dict "component" $component)) }}
+      {{- with $compValues.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $compValues.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $compValues.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $compValues.extraVolumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $component }}
+          image: "{{ $compValues.image.repository }}:{{ $compValues.image.tag }}"
+          imagePullPolicy: {{ $compValues.image.pullPolicy }}
+          {{- with $compValues.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $compValues.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $compValues.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            {{- toYaml $compValues.ports | nindent 12 }}
+          {{- if $compValues.env }}
+          env:
+            {{- toYaml $compValues.env | nindent 12 }}
+          {{- end }}
+          {{- if $compValues.envFrom }}
+          envFrom:
+            {{- toYaml $compValues.envFrom | nindent 12 }}
+          {{- end }}          {{- with $compValues.lifecycle }}
+          lifecycle:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $compValues.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if $compValues.startupProbe }}
+          startupProbe:
+            {{- toYaml $compValues.startupProbe | nindent 12 }}
+          {{- else if $compValues.livenessProbe.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ $compValues.livenessProbe.path }}
+              port: {{ $compValues.livenessProbe.port }}
+            initialDelaySeconds: {{ $compValues.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ $compValues.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ $compValues.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ $compValues.livenessProbe.failureThreshold }}
+          {{- end }}
+          {{- if $compValues.readinessProbe.enabled }}
+          readinessProbe:
+            httpGet:
+              path: {{ $compValues.readinessProbe.path }}
+              port: {{ $compValues.readinessProbe.port }}
+            initialDelaySeconds: {{ $compValues.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ $compValues.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ $compValues.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ $compValues.readinessProbe.failureThreshold }}
+          {{- end }}
+          {{- with $compValues.extraVolumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

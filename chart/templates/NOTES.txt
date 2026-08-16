@@ -1,0 +1,39 @@
+{{- $root := . }}
+{{- $gatewayEnabled := .Values.gateway.enabled }}
+{{- $dashboardEnabled := .Values.dashboard.enabled }}
+Hermes gateway and dashboard have been deployed to the cluster.
+
+{{- if $gatewayEnabled }}
+1. Get the gateway application URL by running these commands:
+{{- if contains "NodePort" .Values.gateway.service.type }}
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "hermes.fullname" . }}-gateway)
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo http://$NODE_IP:$NODE_PORT
+{{- else if contains "LoadBalancer" .Values.gateway.service.type }}
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "hermes.fullname" . }}-gateway -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+  echo http://$SERVICE_IP:{{ .Values.gateway.service.port }}
+{{- else }}
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "hermes.fullname" . }}-gateway {{ .Values.gateway.service.port }}:{{ .Values.gateway.service.port }}
+{{- end }}
+{{- end }}
+
+{{- if $dashboardEnabled }}
+2. Get the dashboard application URL by running these commands:
+{{- if contains "NodePort" .Values.dashboard.service.type }}
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "hermes.fullname" . }}-dashboard)
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo http://$NODE_IP:$NODE_PORT
+{{- else if contains "LoadBalancer" .Values.dashboard.service.type }}
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "hermes.fullname" . }}-dashboard -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+  echo http://$SERVICE_IP:{{ .Values.dashboard.service.port }}
+{{- else }}
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "hermes.fullname" . }}-dashboard {{ .Values.dashboard.service.port }}:{{ .Values.dashboard.service.port }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.ingress.enabled }}
+3. The services are exposed through ingress:
+{{- range .Values.ingress.hosts }}
+   - https://{{ .host }}
+{{- end }}
+{{- end }}

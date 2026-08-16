@@ -1,0 +1,35 @@
+{{- $root := . }}
+{{- $components := list (dict "name" "gateway" "values" .Values.gateway) (dict "name" "dashboard" "values" .Values.dashboard) }}
+{{- range $components }}
+{{- if .values.enabled }}
+{{- $component := .name }}
+{{- $compValues := .values }}
+{{- with $root }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hermes.fullname" . }}-{{ $component }}
+  labels:
+    {{- include "hermes.componentLabels" (merge (deepCopy .) (dict "component" $component)) | nindent 4 }}
+  {{- with $compValues.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $compValues.service.type }}
+  {{- with $compValues.service.ports }}
+  ports:
+    - name: http
+      port: {{ $compValues.service.port }}
+      targetPort: {{ $compValues.service.targetPort }}
+      protocol: TCP
+    {{- range $compValues.service.extraPorts }}
+    - {{ toYaml . | nindent 6 | trimPrefix "  " }}
+    {{- end }}
+  {{- end }}
+  selector:
+    {{- include "hermes.componentSelectorLabels" (merge (deepCopy .) (dict "component" $component)) | nindent 4 }}
+{{- end }}
+{{- end }}
+{{- end }}

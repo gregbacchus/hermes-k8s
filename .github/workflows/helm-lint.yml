@@ -1,0 +1,24 @@
+name: helm-lint
+
+on:
+  push:
+    branches: [main]
+    paths: ['chart/**']
+  pull_request:
+    paths: ['chart/**']
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+      - name: Lint chart
+        run: helm lint ./chart
+      - name: Template chart
+        run: helm template hermes ./chart > /tmp/render.yaml
+      - name: Validate schema
+        run: |
+          kubectl apply --dry-run=client --validate=true -f /tmp/render.yaml

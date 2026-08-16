@@ -1,0 +1,219 @@
+# Default values for the hermes chart.
+# This is a YAML-formatted file. Declare variables to be passed into your templates.
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+## Service account configuration
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+## Common labels/annotations applied to all resources
+commonLabels: {}
+commonAnnotations: {}
+
+## Pod-level settings applied to both gateway and dashboard
+podAnnotations: {}
+podLabels: {}
+
+## Node and affinity settings applied to both workloads
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+## ---------- Hermes Gateway ----------
+gateway:
+  enabled: true
+  replicaCount: 1
+  annotations: {}
+  podAnnotations: {}
+  podLabels: {}
+  image:
+    repository: ghcr.io/geee-be/hermes-gateway
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  command: []
+  args: []
+  env: []
+  envFrom: []
+  ports:
+    - name: http
+      containerPort: 8080
+      protocol: TCP
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: http
+    annotations: {}
+    extraPorts: []
+  serviceAccount:
+    create: null
+    name: ""
+    annotations: null
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: null
+  livenessProbe:
+    enabled: true
+    path: /healthz
+    port: http
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readinessProbe:
+    enabled: true
+    path: /readyz
+    port: http
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 3
+  startupProbe: {}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  containerSecurityContext: {}
+  podSecurityContext: {}
+  priorityClassName: ""
+  topologySpreadConstraints: []
+  extraVolumes: []
+  extraVolumeMounts: []
+  lifecycle: {}
+  terminationGracePeriodSeconds: 30
+  strategy: {}
+
+## ---------- Hermes Dashboard ----------
+dashboard:
+  enabled: true
+  replicaCount: 1
+  annotations: {}
+  podAnnotations: {}
+  podLabels: {}
+  image:
+    repository: ghcr.io/geee-be/hermes-dashboard
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  command: []
+  args: []
+  env: []
+  envFrom: []
+  ports:
+    - name: http
+      containerPort: 3000
+      protocol: TCP
+  service:
+    type: ClusterIP
+    port: 3000
+    targetPort: http
+    annotations: {}
+    extraPorts: []
+  serviceAccount:
+    create: null
+    name: ""
+    annotations: null
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: null
+  livenessProbe:
+    enabled: true
+    path: /healthz
+    port: http
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readinessProbe:
+    enabled: true
+    path: /readyz
+    port: http
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 3
+  startupProbe: {}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  containerSecurityContext: {}
+  podSecurityContext: {}
+  priorityClassName: ""
+  topologySpreadConstraints: []
+  extraVolumes: []
+  extraVolumeMounts: []
+  lifecycle: {}
+  terminationGracePeriodSeconds: 30
+  strategy: {}
+
+## Shared config / secret material for both workloads
+config:
+  enabled: true
+  data: {}
+  annotations: {}
+
+secret:
+  enabled: false
+  data: {}
+  stringData: {}
+  annotations: {}
+  type: Opaque
+
+## Ingress for exposing the services
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: hermes.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: gateway
+          port: http
+  tls: []
+
+## PodDisruptionBudget for the workloads
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  maxUnavailable: null
+
+## NetworkPolicy
+networkPolicy:
+  enabled: false
+  extraIngressRules: []

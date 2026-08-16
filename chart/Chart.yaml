@@ -1,0 +1,16 @@
+apiVersion: v2
+name: hermes
+description: A Helm chart for running the Hermes gateway and dashboard on Kubernetes
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/gregbacchus/hermes-k8s
+sources:
+  - https://github.com/gregbacchus/hermes-k8s
+keywords:
+  - hermes
+  - gateway
+  - dashboard
+maintainers:
+  - name: Geee Be
+    email: engineering@geee-be.example.com
