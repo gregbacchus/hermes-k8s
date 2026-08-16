@@ -137,9 +137,14 @@ The chart therefore does **not** set `runAsUser`/`runAsNonRoot` (the image refus
 non-root bootstrap); it sets `fsGroup: 10000` so the PVC is group-writable even if the
 image's internal chown is bypassed, and `seccompProfile: RuntimeDefault`.
 
-The container runs with `allowPrivilegeEscalation: false`, all capabilities dropped, and a
-read-only root filesystem. `readOnlyRootFilesystem: true` requires two writable scratch
-volumes, which the chart mounts automatically:
+The container runs with `allowPrivilegeEscalation: false` (no-new-privileges) and a
+read-only root filesystem. Capabilities are dropped to a minimal set: the chart drops `ALL`
+and adds back only the four the s6-overlay bootstrap needs — `CHOWN` (chown `/opt/data`),
+`DAC_OVERRIDE` (seed first-boot files), and `SETUID`/`SETGID` (drop to the `hermes` user).
+Dropping `ALL` outright breaks the s6 bootstrap (`s6-applyuidgid: ... Operation not
+permitted`, container exits 111), which is why the four bootstrap capabilities are retained.
+`readOnlyRootFilesystem: true` requires two writable scratch volumes, which the chart mounts
+automatically:
 
 - `/run` — s6-overlay's runtime state (a **disk-backed** emptyDir; a `medium: Memory`
   tmpfs is mounted `noexec` and breaks s6-overlay).
@@ -227,13 +232,20 @@ helm test hermes
 ```
 
 The state-write contract is asserted in CI: the workflow runs the real
-`nousresearch/hermes-agent` image against an empty volume and verifies it boots and writes
-`config.yaml` and `state.db` (SQLite) owned by uid 10000. To reproduce locally:
+`nousresearch/hermes-agent` image against an empty volume **under the chart's own
+securityContext** (capabilities dropped to the bootstrap set, read-only rootfs, disk-backed
+`/run` and `/tmp`, no-new-privileges) and verifies it boots and writes `config.yaml` and
+`state.db` (SQLite) owned by uid 10000. To reproduce locally:
 
 ```bash
+mkdir -p /tmp/hermes-smoke/{data,run,tmp}
 docker run -d --rm --name hermes-smoke \
-  -v "$(mktemp -d)":/opt/data \
+  -v /tmp/hermes-smoke/data:/opt/data \
+  -v /tmp/hermes-smoke/run:/run \
+  -v /tmp/hermes-smoke/tmp:/tmp \
   -e API_SERVER_ENABLED=true -e API_SERVER_HOST=0.0.0.0 -e API_SERVER_KEY=testkey123 \
+  --cap-drop=ALL --cap-add=CHOWN --cap-add=DAC_OVERRIDE --cap-add=SETGID --cap-add=SETUID \
+  --read-only --security-opt no-new-privileges \
   nousresearch/hermes-agent:latest gateway run
 sleep 15
 docker exec hermes-smoke sh -c 'test -f /opt/data/state.db && test -f /opt/data/config.yaml \

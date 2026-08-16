@@ -101,6 +101,23 @@ jobs:
           assert 'claimName: hermes-data' in open('/tmp/render-existingclaim.yaml').read(), 'existingClaim name must be used'
           print('OK: persistence PVC + HERMES_HOME + fsGroup 10000 + scratch mounts wired')
           "
+      - name: Assert container securityContext capability contract
+        run: |
+          helm template hermes ./chart > /tmp/render-seccomp.yaml
+          python3 -c "
+          import re, sys
+          docs = open('/tmp/render-seccomp.yaml').read().split('---')
+          deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
+          assert deps, 'no Deployment rendered'
+          gw = deps[0]
+          assert 'allowPrivilegeEscalation: false' in gw, 'must set allowPrivilegeEscalation: false'
+          # The s6 bootstrap needs CHOWN/DAC_OVERRIDE/SETGID/SETUID; a bare drop of ALL
+          # (no add back) crashes the image at boot (s6-applyuidgid exits 111).
+          assert '- ALL' in gw, 'capabilities must drop ALL'
+          for cap in ['CHOWN', 'DAC_OVERRIDE', 'SETGID', 'SETUID']:
+              assert ('- ' + cap) in gw, f'capabilities must add back {cap} (s6 bootstrap)'
+          print('OK: container capability contract pinned (drop ALL + bootstrap caps)')
+          "
       - name: Assert image contract (nousresearch/hermes-agent, ports 8642/9119)
         run: |
           helm template hermes ./chart \
@@ -138,21 +155,28 @@ jobs:
           done
 
   smoke:
-    # Runtime evidence: the real Hermes image boots against an empty volume and writes
-    # config.yaml + state.db (SQLite) owned by uid 10000 — proving the persistence and
-    # securityContext contract the chart encodes.
+    # Runtime evidence: the real Hermes image boots against an empty volume UNDER THE
+    # CHART'S OWN securityContext (capabilities dropped to the bootstrap set, read-only
+    # rootfs, disk-backed /run and /tmp scratch, no-new-privileges) and writes config.yaml
+    # + state.db (SQLite) owned by uid 10000 — proving the persistence and securityContext
+    # contract the chart encodes. It must not run with default caps, or it would pass even
+    # though the chart's `drop: [ALL]` default (if misconfigured) crashloops the pod.
     runs-on: ubuntu-latest
     steps:
       - name: Pull Hermes image
         run: docker pull nousresearch/hermes-agent:latest
-      - name: Boot gateway against an empty volume
+      - name: Boot gateway against an empty volume (chart securityContext)
         run: |
-          mkdir -p /tmp/hermes-data
+          mkdir -p /tmp/hermes-smoke/data /tmp/hermes-smoke/run /tmp/hermes-smoke/tmp
           docker run -d --name hermes-smoke \
-            -v /tmp/hermes-data:/opt/data \
+            -v /tmp/hermes-smoke/data:/opt/data \
+            -v /tmp/hermes-smoke/run:/run \
+            -v /tmp/hermes-smoke/tmp:/tmp \
             -e API_SERVER_ENABLED=true \
             -e API_SERVER_HOST=0.0.0.0 \
             -e API_SERVER_KEY=testkey123 \
+            --cap-drop=ALL --cap-add=CHOWN --cap-add=DAC_OVERRIDE --cap-add=SETGID --cap-add=SETUID \
+            --read-only --security-opt no-new-privileges \
             nousresearch/hermes-agent:latest gateway run
       - name: Assert state files written as uid 10000
         run: |

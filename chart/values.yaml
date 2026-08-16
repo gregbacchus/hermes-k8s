@@ -153,12 +153,25 @@ gateway:
   ## Container-level securityContext. readOnlyRootFilesystem is safe because the
   ## image keeps its install tree (`/opt/hermes`) immutable itself, and the chart
   ## mounts writable scratch volumes for `/run` (s6) and `/tmp` (see `scratch`).
+  ##
+  ## The image's s6-overlay init MUST start as root to chown/seed `/opt/data` and
+  ## then drop every supervised service to uid/gid 10000. That bootstrap needs
+  ## CAP_CHOWN (chown the volume), CAP_DAC_OVERRIDE (seed first-boot files) and
+  ## CAP_SETUID/CAP_SETGID (setuid/setgroups to the hermes user). Dropping ALL
+  ## capabilities outright breaks the s6 bootstrap (`s6-applyuidgid: ... Operation
+  ## not permitted`, container exits 111), so we drop ALL and add back only those
+  ## four — the resulting set is exactly {CHOWN, DAC_OVERRIDE, SETGID, SETUID}.
   containerSecurityContext:
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: true
     capabilities:
       drop:
         - ALL
+      add:
+        - CHOWN
+        - DAC_OVERRIDE
+        - SETGID
+        - SETUID
 
   ## Writable scratch volumes required under readOnlyRootFilesystem: true.
   ## s6-overlay writes (and executes from) `/run`; the runtime uses `/tmp`.
