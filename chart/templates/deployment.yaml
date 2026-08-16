@@ -32,16 +32,17 @@ spec:
         {{- with $compValues.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- with (include "hermes.podAnnotations" (merge (deepCopy .) (dict "component" $component))) }}
+      {{- $podAnnotations := include "hermes.podAnnotations" (merge (deepCopy .) (dict "component" $component)) | fromYaml }}
+      {{- if $podAnnotations }}
       annotations:
-        {{- . | nindent 8 }}
+        {{- toYaml $podAnnotations | nindent 8 }}
       {{- end }}
     spec:
       {{- with $compValues.priorityClassName }}
       priorityClassName: {{ . }}
       {{- end }}
       serviceAccountName: {{ include "hermes.serviceAccountName" (merge (deepCopy .) (dict "component" $component)) }}
-      {{- with $compValues.securityContext }}
+      {{- with $compValues.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}

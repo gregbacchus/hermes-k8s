@@ -32,6 +32,11 @@ spec:
           port: 53
         - protocol: UDP
           port: 53
+    - to:
+        - podSelector: {}
+    {{- with .Values.networkPolicy.extraEgressRules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

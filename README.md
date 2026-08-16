@@ -13,9 +13,12 @@ Helm chart for running the **Hermes gateway** and **Hermes dashboard** on Kubern
 
 ## Installing
 
+This chart is not yet published to a chart repository. Install it directly from this
+repository:
+
 ```bash
-helm repo add hermes https://example.com/chart-repo  # or point at this chart path
-helm install hermes ./chart
+git clone https://github.com/gregbacchus/hermes-k8s
+helm install hermes ./hermes-k8s/chart
 ```
 
 For a custom namespace:
@@ -42,6 +45,30 @@ The chart deploys two workloads:
 Both workloads share `serviceAccount`, `podAnnotations`, `podLabels`, `nodeSelector`,
 `tolerations`, `affinity`, `imagePullSecrets`, and the shared `config`/`secret` material.
 
+### Service accounts
+
+- Each enabled component gets its own `ServiceAccount` (`{name}-gateway`, `{name}-dashboard`)
+  unless a global `serviceAccount.name` is set.
+- A non-empty global `serviceAccount.name` overrides both component names; in that case the
+  chart creates exactly **one** `ServiceAccount` with that name, shared by both workloads.
+- `gateway.serviceAccount.name` / `dashboard.serviceAccount.name` are used only when no global
+  `serviceAccount.name` is set, and apply per component.
+- `serviceAccount.create: false` (or a component-level `create: false`) disables creation; the
+  referenced SA must then be created out of band.
+
+### Security contexts
+
+Pod-level and container-level `securityContext` are rendered from separate values, matching the
+Kubernetes API:
+
+- `podSecurityContext` — pod-level fields such as `runAsUser`, `runAsGroup`, `runAsNonRoot`,
+  `fsGroup`, `seccompProfile`.
+- `containerSecurityContext` — container-level fields such as `capabilities`, 
+  `readOnlyRootFilesystem`, `allowPrivilegeEscalation`.
+
+Defaults run as non-root (`runAsUser: 1000`) with a read-only root filesystem, all capabilities
+dropped, and privilege escalation disabled.
+
 ### Key parameters
 
 | Parameter | Description | Default |
@@ -65,7 +92,9 @@ Both workloads share `serviceAccount`, `podAnnotations`, `podLabels`, `nodeSelec
 | `ingress.enabled` | Create an Ingress | `false` |
 | `ingress.hosts` | Ingress host/path rules | see `values.yaml` |
 | `podDisruptionBudget.enabled` | Create PodDisruptionBudgets | `false` |
-| `networkPolicy.enabled` | Create NetworkPolicies | `false` |
+| `networkPolicy.enabled` | Create NetworkPolicies (default-deny ingress+egress) | `false` |
+| `networkPolicy.extraEgressRules` | Extra egress rules for outbound traffic | `[]` |
+| `serviceAccount.name` | Global ServiceAccount name override | `""` |
 
 Full parameter reference is in `chart/values.yaml`.
 
@@ -92,6 +121,22 @@ helm install hermes ./chart \
 The `networkPolicy.extraIngressRules` parameter allows you to restrict ingress to each
 workload. Combined with the shared labels, you can allow the dashboard namespace to reach
 the gateway only.
+
+NetworkPolicies are **default-deny** for both ingress and egress when
+`networkPolicy.enabled=true`. The default egress rule allows:
+
+- DNS lookups (port 53 TCP/UDP) to any namespace,
+- all traffic within the release namespace (so the dashboard can reach the gateway and
+  vice-versa).
+
+Any other outbound traffic (for example the gateway calling an external API) must be added
+via `networkPolicy.extraEgressRules`, e.g.:
+
+```bash
+helm install hermes ./chart \
+  --set networkPolicy.enabled=true \
+  --set 'networkPolicy.extraEgressRules[0].to[0].ipBlock.cidr=0.0.0.0/0'
+```
 
 ## Verifying the release
 

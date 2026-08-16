@@ -1,7 +1,7 @@
 {{- $root := . }}
 {{- $components := list (dict "name" "gateway" "values" .Values.gateway) (dict "name" "dashboard" "values" .Values.dashboard) }}
 {{- range $components }}
-{{- if and .values.enabled .values.autoscaling.enabled }}
+{{- if and .values.enabled .values.autoscaling.enabled (or .values.autoscaling.targetCPUUtilizationPercentage .values.autoscaling.targetMemoryUtilizationPercentage) }}
 {{- $component := .name }}
 {{- $compValues := .values }}
 {{- with $root }}

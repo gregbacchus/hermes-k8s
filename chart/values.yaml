@@ -83,17 +83,18 @@ gateway:
     timeoutSeconds: 2
     failureThreshold: 3
   startupProbe: {}
-  securityContext:
+  ## Pod-level securityContext (runAsUser/runAsGroup/runAsNonRoot/fsGroup/seccompProfile/...)
+  podSecurityContext:
     runAsNonRoot: true
     runAsUser: 1000
     runAsGroup: 1000
+  ## Container-level securityContext (capabilities, readOnlyRootFilesystem, allowPrivilegeEscalation, ...)
+  containerSecurityContext:
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: true
     capabilities:
       drop:
         - ALL
-  containerSecurityContext: {}
-  podSecurityContext: {}
   priorityClassName: ""
   topologySpreadConstraints: []
   extraVolumes: []
@@ -161,17 +162,18 @@ dashboard:
     timeoutSeconds: 2
     failureThreshold: 3
   startupProbe: {}
-  securityContext:
+  ## Pod-level securityContext (runAsUser/runAsGroup/runAsNonRoot/fsGroup/seccompProfile/...)
+  podSecurityContext:
     runAsNonRoot: true
     runAsUser: 1000
     runAsGroup: 1000
+  ## Container-level securityContext (capabilities, readOnlyRootFilesystem, allowPrivilegeEscalation, ...)
+  containerSecurityContext:
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: true
     capabilities:
       drop:
         - ALL
-  containerSecurityContext: {}
-  podSecurityContext: {}
   priorityClassName: ""
   topologySpreadConstraints: []
   extraVolumes: []
@@ -217,3 +219,6 @@ podDisruptionBudget:
 networkPolicy:
   enabled: false
   extraIngressRules: []
+  ## Extra egress rules (beyond the default DNS + same-namespace allowance).
+  ## e.g. to reach an external API: --set 'networkPolicy.extraEgressRules[0].to[0].ipBlock.cidr=0.0.0.0/0'
+  extraEgressRules: []
