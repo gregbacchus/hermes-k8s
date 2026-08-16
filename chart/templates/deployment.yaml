@@ -102,7 +102,7 @@ spec:
           {{- if .Values.secret.enabled }}
           {{- $envFrom = append $envFrom (dict "secretRef" (dict "name" (include "hermes.fullname" .))) }}
           {{- end }}
-          {{- $envFrom = concat $envFrom $compValues.envFrom }}
+          {{- $envFrom = concat $envFrom (default (list) $compValues.envFrom) }}
           {{- if $envFrom }}
           envFrom:
             {{- toYaml $envFrom | nindent 12 }}

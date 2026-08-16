@@ -64,6 +64,23 @@ jobs:
               assert 'secretRef' in d and 'name: hermes' in d, 'Deployment missing secretRef envFrom'
           print(f'OK: {len(deps)} Deployment(s) wired to shared config/secret')
           "
+      - name: Assert envFrom=null renders (concat nil-safety) and keeps wiring
+        run: |
+          helm template hermes ./chart \
+            --set config.enabled=true \
+            --set secret.enabled=true \
+            --set gateway.envFrom=null \
+            --set dashboard.envFrom=null > /tmp/render-envfrom-null.yaml
+          python3 -c "
+          import re, sys
+          docs = open('/tmp/render-envfrom-null.yaml').read().split('---')
+          deps = [d for d in docs if re.search(r'^kind:\s*Deployment\s*$', d, re.M)]
+          assert deps, 'no Deployments rendered'
+          for d in deps:
+              assert 'configMapRef' in d and 'name: hermes' in d, 'Deployment missing configMapRef envFrom'
+              assert 'secretRef' in d and 'name: hermes' in d, 'Deployment missing secretRef envFrom'
+          print(f'OK: {len(deps)} Deployment(s) still wired with gateway/dashboard envFrom=null')
+          "
       - name: Assert NetworkPolicy allows same-namespace ingress
         run: |
           helm template hermes ./chart \
