@@ -252,11 +252,12 @@ response. This requires a configured gateway (API key set):
 helm test hermes
 ```
 
-The state-write contract is asserted in CI: the workflow runs the real
+The state-write and API-server contracts are asserted in CI: the workflow runs the real
 `nousresearch/hermes-agent` image against an empty volume **under the chart's own
 securityContext** (capabilities dropped to the bootstrap set, read-only rootfs, disk-backed
-`/run` and `/tmp`, no-new-privileges) and verifies it boots and writes `config.yaml` and
-`state.db` (SQLite) owned by uid 10000. To reproduce locally:
+`/run` and `/tmp`, no-new-privileges) and verifies it boots, writes `config.yaml` and
+`state.db` (SQLite) owned by uid 10000, **and that `GET /health` returns HTTP 200 with a
+16-char `API_SERVER_KEY`**. To reproduce locally:
 
 ```bash
 mkdir -p /tmp/hermes-smoke/{data,run,tmp}
@@ -271,6 +272,7 @@ docker run -d --rm --name hermes-smoke \
 sleep 15
 docker exec hermes-smoke sh -c 'test -f /opt/data/state.db && test -f /opt/data/config.yaml \
   && [ "$(stat -c %u /opt/data/state.db)" = 10000 ] && echo "state write OK"'
+docker exec hermes-smoke curl -sf http://127.0.0.1:8642/health && echo " <- /health OK"
 ```
 
 ## Development

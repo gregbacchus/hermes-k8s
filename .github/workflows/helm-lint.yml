@@ -176,7 +176,6 @@ jobs:
         run: |
           mkdir -p /tmp/hermes-smoke/data /tmp/hermes-smoke/run /tmp/hermes-smoke/tmp
           docker run -d --name hermes-smoke \
-            -p 8642:8642 \
             -v /tmp/hermes-smoke/data:/opt/data \
             -v /tmp/hermes-smoke/run:/run \
             -v /tmp/hermes-smoke/tmp:/tmp \
@@ -206,9 +205,9 @@ jobs:
       - name: Assert API server /health returns HTTP 200
         run: |
           for i in $(seq 1 60); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8642/health 2>/dev/null || true)
+            code=$(docker exec hermes-smoke curl -sf -o /dev/null -w '%{http_code}' http://127.0.0.1:8642/health 2>/dev/null || true)
             if [ "$code" = "200" ]; then
-              echo "OK: /health returned HTTP 200"
+              echo "OK: /health returned HTTP 200 with a 16-char API key"
               exit 0
             fi
             sleep 5
